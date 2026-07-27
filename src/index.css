@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bento-bg: #0b0c10;
+  --color-bento-card: #1f2833;
+  --color-bento-primary: #66fcf1;
+  --color-bento-secondary: #45a29e;
+  --color-bento-text-muted: #c5c6c7;
+}
