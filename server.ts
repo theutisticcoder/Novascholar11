@@ -57,7 +57,7 @@ app.post("/api/gemini/ocr", async (req, res) => {
     };
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: "gemini-3.1-flash-lite",
       contents: [
         imagePart,
         "Analyze this image which contains academic notes, handwriting, sketches, or math equations.\n" +
@@ -92,7 +92,7 @@ app.post("/api/gemini/transcribe", async (req, res) => {
     };
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: "gemini-3.1-flash-lite",
       contents: [
         audioPart,
         "Listen to this audio recording of an academic lecture, study group, or dictate.\n" +
@@ -123,7 +123,7 @@ app.post("/api/gemini/study-guide", async (req, res) => {
       `Structure the response strictly into the requested JSON schema. Translate equations or math to standard LaTeX ($...$ and $$...$$).`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: "gemini-3.1-flash-lite",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -183,7 +183,7 @@ app.post("/api/gemini/quiz", async (req, res) => {
       `Provide four (4) distinct, realistic options for each question. One option must be strictly correct. Provide a thorough, educational explanation of why the correct option is right and others are wrong. Make sure mathematical symbols or equations are in standard LaTeX ($...$).`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: "gemini-3.1-flash-lite",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -238,7 +238,7 @@ app.post("/api/gemini/flashcards", async (req, res) => {
       `Each card must have a brief, clear, trigger question or key term on the 'front', and a precise, comprehensive, yet digestible answer or conceptual definition on the 'back'. Ensure formulas are LaTeX-formatted ($...$).`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: "gemini-3.1-flash-lite",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -261,6 +261,43 @@ app.post("/api/gemini/flashcards", async (req, res) => {
   } catch (error: any) {
     console.error("Flashcards API Error:", error);
     res.status(500).json({ error: error.message || "An error occurred generating flashcards." });
+  }
+});
+
+// 6. AI LaTeX Math Generator Helper
+app.post("/api/gemini/latex-helper", async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ error: "Missing prompt in request body." });
+    }
+
+    const ai = getAiClient();
+    const aiPrompt = `Convert the following mathematical concept, equation description, or natural language request into standard, clean LaTeX code.\n` +
+      `User Request: "${prompt}"\n\n` +
+      `Provide ONLY valid LaTeX code without enclosing dollars ($ or $$). Return JSON schema format with 'latex' and 'description'.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.1-flash-lite",
+      contents: aiPrompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            latex: { type: Type.STRING, description: "Clean LaTeX code without enclosing $ or $$ signs." },
+            description: { type: Type.STRING, description: "Short 1-sentence math explanation of what this equation represents." }
+          },
+          required: ["latex", "description"]
+        }
+      }
+    });
+
+    const parsedData = JSON.parse(response.text || "{}");
+    res.json(parsedData);
+  } catch (error: any) {
+    console.error("LaTeX Helper API Error:", error);
+    res.status(500).json({ error: error.message || "An error occurred converting to LaTeX." });
   }
 });
 

@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { Plus, Trash2, FileText, Sparkles, BookOpen, Layers, Edit3, Image as ImageIcon, CheckSquare, ChevronRight, Eye, ListPlus, CornerDownRight } from "lucide-react";
+import { Plus, Trash2, FileText, Sparkles, BookOpen, Layers, Edit3, Image as ImageIcon, CheckSquare, ChevronRight, Eye, ListPlus, CornerDownRight, Calculator } from "lucide-react";
 import { Note, NoteType, Course, CornellCue, OutlineItem, MediaItem } from "../types";
 import HandwritingCanvas from "./HandwritingCanvas";
 import MediaManager from "./MediaManager";
 import LatexRenderer from "./LatexRenderer";
+import LatexEditorView from "./LatexEditorView";
 
 interface NotesEditorViewProps {
   notes: Note[];
@@ -28,7 +29,7 @@ export default function NotesEditorView({
   const activeNote = notes.find((n) => n.id === selectedNoteId) || null;
 
   // Active sub-section tab inside the active note editor
-  const [activeTab, setActiveTab] = useState<"edit" | "canvas" | "media" | "preview">("edit");
+  const [activeTab, setActiveTab] = useState<"edit" | "latex" | "canvas" | "media" | "preview">("edit");
 
   // New Note modal states
   const [showAddNote, setShowAddNote] = useState(false);
@@ -313,6 +314,15 @@ export default function NotesEditorView({
                   <span>Editor</span>
                 </button>
                 <button
+                  onClick={() => setActiveTab("latex")}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    activeTab === "latex" ? "bg-bento-primary text-bento-bg shadow-[0_0_12px_rgba(102,252,241,0.2)]" : "text-bento-secondary hover:bg-bento-bg/80"
+                  }`}
+                >
+                  <Calculator className="w-3.5 h-3.5" />
+                  <span>LaTeX Studio</span>
+                </button>
+                <button
                   onClick={() => setActiveTab("canvas")}
                   className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                     activeTab === "canvas" ? "bg-bento-primary text-bento-bg shadow-[0_0_12px_rgba(102,252,241,0.2)]" : "text-bento-secondary hover:bg-bento-bg/80"
@@ -541,6 +551,16 @@ export default function NotesEditorView({
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Tab: Dedicated Interactive LaTeX Studio */}
+              {activeTab === "latex" && (
+                <LatexEditorView
+                  initialContent={activeNote.content}
+                  onInsertIntoNote={(insertedLatex) => {
+                    handleUpdateContent(activeNote.content + "\n\n" + insertedLatex);
+                  }}
+                />
               )}
 
               {/* Tab 2: Whiteboard / Canvas Drawing View */}
