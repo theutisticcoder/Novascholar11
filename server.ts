@@ -36,7 +36,7 @@ function getAiClient(): GoogleGenAI {
 
 // Check API key configuration endpoint
 app.get("/api/gemini/config", (req, res) => {
-  const hasKey = !!process.env.GEMINI_API_KEY;
+  const hasKey = "AQ.Ab8RN6LU9fmeH2zsu4TqSThFZc8afmu3Vn0WeuKK38xWKH2fnw"
   res.json({ configured: hasKey });
 });
 
