@@ -85,7 +85,7 @@ export default function AiCompanionView({
       setGeneratedGuide(guide);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "An error occurred with Gemini study guide generation.");
+      setError(err.message || "An error occurred with Mistral AI study guide generation.");
     } finally {
       setLoading(false);
     }
@@ -128,7 +128,7 @@ export default function AiCompanionView({
       setGeneratedQuiz(quiz);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "An error occurred with Gemini quiz generation.");
+      setError(err.message || "An error occurred with Mistral AI quiz generation.");
     } finally {
       setLoading(false);
     }
@@ -169,7 +169,7 @@ export default function AiCompanionView({
       onAddFlashcards(cards);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "An error occurred with Gemini flashcards generation.");
+      setError(err.message || "An error occurred with Mistral AI flashcards generation.");
     } finally {
       setLoading(false);
     }
@@ -349,7 +349,7 @@ export default function AiCompanionView({
           <div className="max-w-md mx-auto">
             <h3 className="text-base font-extrabold text-white">Compiling Course Syllabi and Lectures...</h3>
             <p className="text-xs text-bento-text-muted/80 mt-1.5 leading-relaxed">
-              We are utilizing Gemini Flash to parse through your {activeCourseNotes.length} active notes, extracting key definitions, compiling LaTeX equations, and structuring active-recall questions. Please wait.
+              We are utilizing Mistral AI (mistral-small-2506) to parse through your {activeCourseNotes.length} active notes, extracting key definitions, compiling LaTeX equations, and structuring active-recall questions. Please wait.
             </p>
           </div>
         </div>
@@ -618,7 +618,7 @@ export default function AiCompanionView({
           <Sparkles className="w-12 h-12 text-bento-primary mx-auto" />
           <h3 className="text-base font-extrabold text-white">Trigger AI Companion Tools</h3>
           <p className="text-xs text-bento-text-muted/85 mt-1.5 leading-relaxed font-medium">
-            Choose a subject above and hit generate to prompt our Gemini study engine! It parses through notes to formulate dynamic Math LaTeX worksheets, multi-choice question arrays, and 3D flipped decks completely custom tailored to your study scope.
+            Choose a subject above and hit generate to prompt our Mistral AI study engine! It parses through notes to formulate dynamic Math LaTeX worksheets, multi-choice question arrays, and 3D flipped decks completely custom tailored to your study scope.
           </p>
         </div>
       )}

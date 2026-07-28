@@ -138,7 +138,7 @@ export default function LatexEditorView({ initialContent = "", onInsertIntoNote 
       }
     } catch (err: any) {
       console.error(err);
-      setAiError(err.message || "Failed to request Gemini LaTeX conversion.");
+      setAiError(err.message || "Failed to request Mistral LaTeX conversion.");
     } finally {
       setAiLoading(false);
     }
@@ -155,7 +155,7 @@ export default function LatexEditorView({ initialContent = "", onInsertIntoNote 
             </div>
             <div>
               <h3 className="text-sm font-extrabold text-white">Interactive LaTeX Math Studio</h3>
-              <p className="text-[11px] text-bento-text-muted">Compose, preview, and generate typesetting formulas powered by Gemini Flash Lite</p>
+              <p className="text-[11px] text-bento-text-muted">Compose, preview, and generate typesetting formulas powered by Mistral AI (mistral-small-2506)</p>
             </div>
           </div>
 

@@ -351,7 +351,7 @@ export default function App() {
             <span className="text-bento-secondary/30">|</span>
             <span className="flex items-center gap-1.5 justify-center">
               <span className="w-1.5 h-1.5 bg-bento-primary rounded-full animate-pulse"></span>
-              <span>Powered by Gemini 3.6 Flash & Google AI Studio</span>
+              <span>Powered by Mistral AI (mistral-small-2506)</span>
             </span>
           </div>
         </div>
