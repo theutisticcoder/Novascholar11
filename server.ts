@@ -34,7 +34,7 @@ let aiClient: GoogleGenAI | null = null;
 
 function getAiClient(): GoogleGenAI {
   if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY || "AI_STUDIO_DEFAULT_KEY";
+    const apiKey = process.env.GEMINI_API_KEY;
     aiClient = new GoogleGenAI({
       apiKey,
       httpOptions: {
