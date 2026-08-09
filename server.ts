@@ -47,12 +47,11 @@ function getAiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Falling back from 3.5 flash-lite to 3.1 flash-lite and older/other flash lites when limits are hit
+// Falling back strictly using flash-lite models as requested by user
 const FALLBACK_MODELS = [
-  "gemini-3.5-flash-lite", // 3.5 flash-lite
-  "gemini-3.1-flash-lite", // 3.1 flash-lite
-  "gemini-2.5-flash",      // 2.5 flash
-  "gemini-1.5-flash"       // 1.5 flash
+  "gemini-3.5-flash-lite", // 3.5 flash-lite (Primary)
+  "gemini-3.1-flash-lite", // 3.1 flash-lite (Secondary)
+  "gemini-1.5-flash"       // Standard Flash fallback
 ];
 
 async function callGeminiWithFallback(config: {
@@ -157,6 +156,38 @@ app.post("/api/gemini/transcribe", async (req, res) => {
   } catch (error: any) {
     console.error("Transcription API Error:", error);
     res.status(500).json({ error: error.message || "An error occurred during audio transcription." });
+  }
+});
+
+// 2.1 PDF Document Notes Parser
+app.post("/api/gemini/pdf-notes", async (req, res) => {
+  try {
+    const { pdfBase64 } = req.body;
+    if (!pdfBase64) {
+      return res.status(400).json({ error: "Missing pdfBase64 in request body." });
+    }
+
+    const pdfPart = {
+      inlineData: {
+        mimeType: "application/pdf",
+        data: pdfBase64,
+      },
+    };
+
+    const promptText = "Analyze this PDF document carefully.\n" +
+      "1. Extract the main academic content, structuring it into clear sections with headers.\n" +
+      "2. Identify key definitions, theories, and concepts.\n" +
+      "3. Convert any mathematical formulas to standard LaTeX notation ($...$ and $$...$$).\n" +
+      "4. Provide a comprehensive summary that acts as a standalone study note.";
+
+    const response = await callGeminiWithFallback({
+      contents: [pdfPart, promptText]
+    });
+
+    res.json({ result: response.text });
+  } catch (error: any) {
+    console.error("PDF Parsing API Error:", error);
+    res.status(500).json({ error: error.message || "An error occurred during PDF parsing." });
   }
 });
 
@@ -338,7 +369,7 @@ app.post("/api/gemini/latex-helper", async (req, res) => {
   }
 });
 
-// 7. Combined AI Curriculum and Lesson Builder
+// 7. AI Curriculum Structure Builder (25-30 topics)
 app.post("/api/gemini/curriculum", async (req, res) => {
   try {
     const { subject, notesContent } = req.body;
@@ -346,17 +377,15 @@ app.post("/api/gemini/curriculum", async (req, res) => {
       return res.status(400).json({ error: "Missing subject in request body." });
     }
 
-    const promptText = `Generate a fully integrated, comprehensive academic Curriculum and modular Lesson Builder for the subject: "${subject}".\n` +
+    const promptText = `Generate a fully integrated, comprehensive academic Curriculum Skeleton for the subject: "${subject}".\n` +
       `Below is the raw note content provided as background context:\n` +
       `--- CONTEXT NOTES START ---\n${notesContent || "No context notes provided. Generate a full foundational curriculum based on standard collegiate syllabus."}\n--- CONTEXT NOTES END ---\n\n` +
-      `Your output must divide this subject into exactly 3 robust, logical, chronological Lesson Chunks (e.g. Lesson 1, Lesson 2, Lesson 3).\n` +
-      `For EACH lesson chunk, you must provide:\n` +
-      `1. A Title and estimated completion Duration (e.g., "15 mins").\n` +
-      `2. A comprehensive, beautifully formatted Explanation lecture in Markdown. Include formulas formatted in standard LaTeX ($...$ and $$...$$).\n` +
-      `3. A Multimedia conceptGraph detailing the relationships between the key concepts of that specific lesson. Include at least 3-5 concept nodes with custom descriptive labels and 2-4 linkage paths describing relationships.\n` +
-      `4. A Quiz of exactly 3 relevant multiple-choice questions for that lesson, complete with explanations.\n` +
-      `5. Exactly 3 active-recall Flashcards (front and back) for student self-testing.\n\n` +
-      `Strictly output a JSON object matching the defined curriculum response schema. Use LaTeX for math symbols.`;
+      `Your output must divide this subject into exactly 25-30 distinct, logical, chronological Topics/Lessons.\n` +
+      `For EACH topic, provide:\n` +
+      `1. A Title.\n` +
+      `2. A short duration estimate (e.g. "15 mins").\n` +
+      `3. A unique ID (e.g. "topic-1").\n\n` +
+      `Respond with a JSON object matching the defined curriculum skeleton schema.`;
 
     const response = await callGeminiWithFallback({
       contents: promptText,
@@ -373,69 +402,9 @@ app.post("/api/gemini/curriculum", async (req, res) => {
               properties: {
                 id: { type: Type.STRING },
                 title: { type: Type.STRING },
-                duration: { type: Type.STRING },
-                explanation: { type: Type.STRING },
-                conceptGraph: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    nodes: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          id: { type: Type.STRING },
-                          label: { type: Type.STRING },
-                          description: { type: Type.STRING },
-                          val: { type: Type.INTEGER }
-                        },
-                        required: ["id", "label", "description", "val"]
-                      }
-                    },
-                    links: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          source: { type: Type.STRING },
-                          target: { type: Type.STRING },
-                          relationship: { type: Type.STRING }
-                        },
-                        required: ["source", "target", "relationship"]
-                      }
-                    }
-                  },
-                  required: ["title", "nodes", "links"]
-                },
-                quiz: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      question: { type: Type.STRING },
-                      options: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING }
-                      },
-                      answer: { type: Type.INTEGER },
-                      explanation: { type: Type.STRING }
-                    },
-                    required: ["question", "options", "answer", "explanation"]
-                  }
-                },
-                flashcards: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      front: { type: Type.STRING },
-                      back: { type: Type.STRING }
-                    },
-                    required: ["front", "back"]
-                  }
-                }
+                duration: { type: Type.STRING }
               },
-              required: ["id", "title", "duration", "explanation", "conceptGraph", "quiz", "flashcards"]
+              required: ["id", "title", "duration"]
             }
           }
         },
@@ -446,8 +415,105 @@ app.post("/api/gemini/curriculum", async (req, res) => {
     const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
-    console.error("Combined Curriculum API Error:", error);
+    console.error("Curriculum API Error:", error);
     res.status(500).json({ error: error.message || "An error occurred generating curriculum lessons." });
+  }
+});
+
+// 8. AI Lesson Content Builder (Lazy Loader)
+app.post("/api/gemini/lesson-content", async (req, res) => {
+  try {
+    const { subject, topicTitle, notesContent } = req.body;
+    if (!subject || !topicTitle) {
+      return res.status(400).json({ error: "Missing subject or topicTitle in request body." });
+    }
+
+    const promptText = `Generate detailed academic lesson content for the specific topic: "${topicTitle}" within the broader subject of "${subject}".\n` +
+      `Reference notes context:\n` +
+      `--- NOTES ---\n${notesContent || "Use standard academic knowledge."}\n--- NOTES ---\n\n` +
+      `Provide:\n` +
+      `1. A comprehensive, beautifully formatted Explanation lecture in Markdown. Include formulas in standard LaTeX ($...$ and $$...$$).\n` +
+      `2. A conceptGraph detailing the relationships between key concepts of THIS topic. Include 3-5 concept nodes and 2-4 linkage paths.\n` +
+      `3. A Quiz of exactly 3 relevant multiple-choice questions with explanations.\n` +
+      `4. Exactly 3 active-recall Flashcards (front and back).\n\n` +
+      `Respond with a JSON object matching the lesson content schema.`;
+
+    const response = await callGeminiWithFallback({
+      contents: promptText,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          explanation: { type: Type.STRING },
+          conceptGraph: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              nodes: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    label: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    val: { type: Type.INTEGER }
+                  },
+                  required: ["id", "label", "description", "val"]
+                }
+              },
+              links: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    source: { type: Type.STRING },
+                    target: { type: Type.STRING },
+                    relationship: { type: Type.STRING }
+                  },
+                  required: ["source", "target", "relationship"]
+                }
+              }
+            },
+            required: ["title", "nodes", "links"]
+          },
+          quiz: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                question: { type: Type.STRING },
+                options: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                },
+                answer: { type: Type.INTEGER },
+                explanation: { type: Type.STRING }
+              },
+              required: ["question", "options", "answer", "explanation"]
+            }
+          },
+          flashcards: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                front: { type: Type.STRING },
+                back: { type: Type.STRING }
+              },
+              required: ["front", "back"]
+            }
+          }
+        },
+        required: ["explanation", "conceptGraph", "quiz", "flashcards"]
+      }
+    });
+
+    const parsedData = JSON.parse(response.text || "{}");
+    res.json(parsedData);
+  } catch (error: any) {
+    console.error("Lesson Content API Error:", error);
+    res.status(500).json({ error: error.message || "An error occurred generating lesson content." });
   }
 });
 

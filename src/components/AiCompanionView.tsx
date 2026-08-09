@@ -47,6 +47,7 @@ export default function AiCompanionView({
   // Curriculum Studio States
   const [generatedCurriculums, setGeneratedCurriculums] = useState<{ [courseId: string]: Curriculum }>({});
   const [activeLessonIndex, setActiveLessonIndex] = useState<number>(0);
+  const [loadingLessonContent, setLoadingLessonContent] = useState<boolean>(false);
   const [curriculumFlashcardFlipped, setCurriculumFlashcardFlipped] = useState<boolean>(false);
   const [curriculumFlashcardIndex, setCurriculumFlashcardIndex] = useState<number>(0);
   
@@ -107,11 +108,63 @@ export default function AiCompanionView({
         ...prev,
         [selectedCourseId]: curriculum
       }));
+
+      // Auto-load first lesson content
+      if (curriculum.lessons.length > 0) {
+        handleLoadLessonContent(curriculum, 0);
+      }
     } catch (err: any) {
       console.error(err);
       setError(err.message || "An error occurred during Gemini curriculum compiling.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLoadLessonContent = async (curriculum: Curriculum, lessonIndex: number) => {
+    const lesson = curriculum.lessons[lessonIndex];
+    if (!lesson || lesson.explanation) return; // Already loaded
+
+    setLoadingLessonContent(true);
+    try {
+      const response = await fetch("/api/gemini/lesson-content", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: activeCourse?.name,
+          topicTitle: lesson.title,
+          notesContent: getNotesContextText()
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Failed to load lesson content.");
+      }
+
+      const data = await response.json();
+      
+      const updatedLessons = [...curriculum.lessons];
+      updatedLessons[lessonIndex] = {
+        ...lesson,
+        explanation: data.explanation,
+        conceptGraph: data.conceptGraph,
+        quiz: data.quiz,
+        flashcards: data.flashcards
+      };
+
+      setGeneratedCurriculums((prev) => ({
+        ...prev,
+        [selectedCourseId]: {
+          ...curriculum,
+          lessons: updatedLessons
+        }
+      }));
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to load lesson details.");
+    } finally {
+      setLoadingLessonContent(false);
     }
   };
 
@@ -828,9 +881,10 @@ export default function AiCompanionView({
                   </span>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">
                   {currentCurriculum.lessons.map((lesson, idx) => {
                     const isActive = activeLessonIndex === idx;
+                    const isLoaded = !!lesson.explanation;
                     return (
                       <button
                         key={lesson.id}
@@ -843,24 +897,33 @@ export default function AiCompanionView({
                           setLessonQuizSelectedAnswer(null);
                           setLessonQuizScore(0);
                           setLessonQuizComplete(false);
+                          
+                          if (!isLoaded) {
+                            handleLoadLessonContent(currentCurriculum, idx);
+                          }
                         }}
-                        className={`w-full text-left p-4 border rounded-2xl transition cursor-pointer flex items-center justify-between gap-3 ${
+                        className={`w-full text-left p-3 border rounded-2xl transition cursor-pointer flex items-center justify-between gap-3 ${
                           isActive
                             ? "bg-bento-bg border-bento-primary/50 text-white shadow-[0_0_12px_rgba(102,252,241,0.06)]"
                             : "bg-bento-card border-bento-secondary/10 text-bento-text-muted hover:text-white hover:border-bento-primary/30"
                         }`}
                       >
-                        <div className="space-y-1">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-bento-secondary">
-                            Unit 0{idx + 1}
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-bento-secondary">
+                            Unit {idx + 1 < 10 ? `0${idx + 1}` : idx + 1}
                           </span>
-                          <h4 className="text-xs font-extrabold leading-tight">
+                          <h4 className="text-[11px] font-extrabold leading-tight truncate">
                             {lesson.title}
                           </h4>
                         </div>
-                        <span className="text-[10px] font-black uppercase text-bento-primary bg-bento-primary/10 px-2 py-1 rounded-lg shrink-0">
-                          {lesson.duration}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {!isLoaded && (
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" title="Content not loaded" />
+                          )}
+                          <span className="text-[9px] font-black uppercase text-bento-primary bg-bento-primary/10 px-1.5 py-0.5 rounded-lg shrink-0">
+                            {lesson.duration}
+                          </span>
+                        </div>
                       </button>
                     );
                   })}
@@ -897,43 +960,61 @@ export default function AiCompanionView({
 
             {/* Right main panel: Dynamic Lesson Workspace (8 cols) */}
             <div className="lg:col-span-8 space-y-6">
-              {/* 1. CONCEPT GRAPH CONTAINER */}
-              {currentCurriculum.lessons[activeLessonIndex].conceptGraph && (
-                <ConceptGraphVisualizer graph={currentCurriculum.lessons[activeLessonIndex].conceptGraph} />
-              )}
-
-              {/* 2. LECTURE EXPLANATION CARD */}
-              <div className="bg-bento-card border border-bento-secondary/15 p-6 rounded-3xl shadow-md space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-bento-secondary/10">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-bento-primary" />
-                    <h3 className="text-sm font-extrabold text-white">
-                      Lesson Core: {currentCurriculum.lessons[activeLessonIndex].title}
-                    </h3>
+              {loadingLessonContent ? (
+                <div className="bg-bento-card border border-bento-secondary/15 rounded-3xl p-16 text-center shadow-md space-y-4">
+                  <Loader2 className="w-10 h-10 animate-spin text-bento-primary mx-auto" />
+                  <div>
+                    <h3 className="text-base font-extrabold text-white">Generating Detailed Lesson Insights...</h3>
+                    <p className="text-xs text-bento-text-muted/80 mt-1.5">Gemini is compiling specific lecture notes, quizzes, and concept graphs for this unit.</p>
                   </div>
-                  <span className="text-[10px] text-bento-secondary uppercase font-bold tracking-widest">
-                    Lecture Notes
-                  </span>
                 </div>
-
-                <div className="prose prose-sm max-w-none text-xs text-bento-text-muted leading-relaxed font-sans space-y-2">
-                  <LatexRenderer text={currentCurriculum.lessons[activeLessonIndex].explanation} className="text-sm leading-relaxed" />
+              ) : !currentCurriculum.lessons[activeLessonIndex].explanation ? (
+                <div className="bg-bento-card border border-bento-secondary/15 rounded-3xl p-16 text-center shadow-md space-y-4">
+                  <HelpCircle className="w-10 h-10 text-bento-secondary/30 mx-auto" />
+                  <div>
+                    <h3 className="text-base font-extrabold text-white">Lesson Content Pending</h3>
+                    <p className="text-xs text-bento-text-muted/80 mt-1.5">Select this unit to trigger AI generation of comprehensive study materials.</p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* 1. CONCEPT GRAPH CONTAINER */}
+                  {currentCurriculum.lessons[activeLessonIndex].conceptGraph && (
+                    <ConceptGraphVisualizer graph={currentCurriculum.lessons[activeLessonIndex].conceptGraph} />
+                  )}
 
-              {/* 3. INTERACTIVE MINICARDS & ASSESSMENT GRIDS */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                {/* 3A. LESSON FLASHCARDS */}
-                <div className="bg-bento-card border border-bento-secondary/15 p-5 rounded-3xl shadow-sm space-y-4">
-                  <div className="flex items-center justify-between pb-2 border-b border-bento-secondary/10 text-xs">
-                    <span className="font-bold text-white uppercase tracking-wider">Lesson Flashcards</span>
-                    <span className="text-[10px] text-bento-secondary font-black">
-                      Card {curriculumFlashcardIndex + 1} of {currentCurriculum.lessons[activeLessonIndex].flashcards.length}
-                    </span>
+                  {/* 2. LECTURE EXPLANATION CARD */}
+                  <div className="bg-bento-card border border-bento-secondary/15 p-6 rounded-3xl shadow-md space-y-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-bento-secondary/10">
+                      <div className="flex items-center gap-2">
+                        <BookOpen className="w-4 h-4 text-bento-primary" />
+                        <h3 className="text-sm font-extrabold text-white">
+                          Lesson Core: {currentCurriculum.lessons[activeLessonIndex].title}
+                        </h3>
+                      </div>
+                      <span className="text-[10px] text-bento-secondary uppercase font-bold tracking-widest">
+                        Lecture Notes
+                      </span>
+                    </div>
+
+                    <div className="prose prose-sm max-w-none text-xs text-bento-text-muted leading-relaxed font-sans space-y-2">
+                      <LatexRenderer text={currentCurriculum.lessons[activeLessonIndex].explanation || ""} className="text-sm leading-relaxed" />
+                    </div>
                   </div>
 
-                  {currentCurriculum.lessons[activeLessonIndex].flashcards.length > 0 ? (
+                  {/* 3. INTERACTIVE MINICARDS & ASSESSMENT GRIDS */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    {/* 3A. LESSON FLASHCARDS */}
+                    <div className="bg-bento-card border border-bento-secondary/15 p-5 rounded-3xl shadow-sm space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-bento-secondary/10 text-xs">
+                        <span className="font-bold text-white uppercase tracking-wider">Lesson Flashcards</span>
+                        <span className="text-[10px] text-bento-secondary font-black">
+                          Card {curriculumFlashcardIndex + 1} of {currentCurriculum.lessons[activeLessonIndex].flashcards?.length || 0}
+                        </span>
+                      </div>
+
+                      {currentCurriculum.lessons[activeLessonIndex].flashcards && currentCurriculum.lessons[activeLessonIndex].flashcards!.length > 0 ? (
                     <div className="space-y-4">
                       {/* Flipping block */}
                       <div
@@ -949,7 +1030,7 @@ export default function AiCompanionView({
                           {/* Front */}
                           <div className="backface-hidden absolute inset-0 bg-bento-bg border border-bento-secondary/15 p-4 rounded-2xl flex flex-col justify-between items-center text-center">
                             <span className="text-[9px] uppercase font-bold text-bento-primary">Recall Prompt</span>
-                            <LatexRenderer text={currentCurriculum.lessons[activeLessonIndex].flashcards[curriculumFlashcardIndex].front} className="text-xs font-extrabold text-white leading-snug" />
+                            <LatexRenderer text={currentCurriculum.lessons[activeLessonIndex].flashcards?.[curriculumFlashcardIndex]?.front || ""} className="text-xs font-extrabold text-white leading-snug" />
                             <span className="text-[9px] text-bento-secondary font-bold">Click to flip</span>
                           </div>
 
@@ -959,7 +1040,7 @@ export default function AiCompanionView({
                             style={{ transform: "rotateY(180deg)" }}
                           >
                             <span className="text-[9px] uppercase font-bold text-bento-primary font-mono">Concept Key</span>
-                            <LatexRenderer text={currentCurriculum.lessons[activeLessonIndex].flashcards[curriculumFlashcardIndex].back} className="text-[11px] text-bento-text-muted leading-relaxed font-sans" />
+                            <LatexRenderer text={currentCurriculum.lessons[activeLessonIndex].flashcards?.[curriculumFlashcardIndex]?.back || ""} className="text-[11px] text-bento-text-muted leading-relaxed font-sans" />
                             <span className="text-[9px] text-bento-secondary font-bold">Click to flip</span>
                           </div>
                         </div>
@@ -971,7 +1052,7 @@ export default function AiCompanionView({
                           onClick={() => {
                             setCurriculumFlashcardFlipped(false);
                             setCurriculumFlashcardIndex((prev) => 
-                              prev > 0 ? prev - 1 : currentCurriculum.lessons[activeLessonIndex].flashcards.length - 1
+                              prev > 0 ? prev - 1 : (currentCurriculum.lessons[activeLessonIndex].flashcards?.length || 1) - 1
                             );
                           }}
                           className="px-3 py-1.5 bg-bento-bg border border-bento-secondary/10 hover:border-bento-primary/30 text-[10px] font-bold text-white rounded-lg transition cursor-pointer"
@@ -982,7 +1063,7 @@ export default function AiCompanionView({
                           onClick={() => {
                             setCurriculumFlashcardFlipped(false);
                             setCurriculumFlashcardIndex((prev) => 
-                              prev + 1 < currentCurriculum.lessons[activeLessonIndex].flashcards.length ? prev + 1 : 0
+                              prev + 1 < (currentCurriculum.lessons[activeLessonIndex].flashcards?.length || 0) ? prev + 1 : 0
                             );
                           }}
                           className="px-3 py-1.5 bg-bento-bg border border-bento-secondary/10 hover:border-bento-primary/30 text-[10px] font-bold text-white rounded-lg transition cursor-pointer"
@@ -1003,88 +1084,95 @@ export default function AiCompanionView({
                   <div className="flex items-center justify-between pb-2 border-b border-bento-secondary/10 text-xs">
                     <span className="font-bold text-white uppercase tracking-wider">Lesson mini-Quiz</span>
                     <span className="text-[10px] text-bento-primary bg-bento-primary/10 border border-bento-primary/25 px-2 py-0.5 rounded-lg font-black">
-                      {!lessonQuizComplete ? `Q ${lessonQuizQuestionIndex + 1} of ${currentCurriculum.lessons[activeLessonIndex].quiz.length}` : "Finished"}
+                      {!lessonQuizComplete ? `Q ${lessonQuizQuestionIndex + 1} of ${currentCurriculum.lessons[activeLessonIndex].quiz?.length || 0}` : "Finished"}
                     </span>
                   </div>
 
-                  {!lessonQuizComplete ? (
-                    <div className="space-y-4">
-                      {/* Active Question */}
-                      <div className="space-y-3">
-                        <LatexRenderer text={currentCurriculum.lessons[activeLessonIndex].quiz[lessonQuizQuestionIndex].question} className="text-xs font-extrabold text-white leading-snug" />
-                        
-                        {/* Options list */}
-                        <div className="space-y-1.5">
-                          {currentCurriculum.lessons[activeLessonIndex].quiz[lessonQuizQuestionIndex].options.map((opt, oIdx) => {
-                            const isAnswered = lessonQuizSelectedAnswer !== null;
-                            const isCorrect = oIdx === currentCurriculum.lessons[activeLessonIndex].quiz[lessonQuizQuestionIndex].answer;
-                            const isSelected = oIdx === lessonQuizSelectedAnswer;
-
-                            let optStyle = "border-bento-secondary/10 hover:border-bento-primary/40 bg-bento-bg/55 text-white";
-                            if (isAnswered) {
-                              if (isCorrect) {
-                                optStyle = "border-emerald-500 bg-emerald-950/20 text-emerald-300 font-bold";
-                              } else if (isSelected) {
-                                optStyle = "border-rose-500 bg-rose-950/20 text-rose-300 font-bold";
-                              } else {
-                                optStyle = "border-bento-secondary/5 opacity-40";
-                              }
-                            }
-
-                            return (
-                              <button
-                                key={oIdx}
-                                onClick={() => handleSelectLessonQuizOption(oIdx, currentCurriculum.lessons[activeLessonIndex].quiz[lessonQuizQuestionIndex].answer)}
-                                disabled={isAnswered}
-                                className={`w-full text-left px-3 py-2 border rounded-xl text-[11px] font-semibold transition cursor-pointer ${optStyle}`}
-                              >
-                                <LatexRenderer text={opt} inline={true} />
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* AI explanation and Next buttons */}
-                      {lessonQuizSelectedAnswer !== null && (
+                  {currentCurriculum.lessons[activeLessonIndex].quiz && currentCurriculum.lessons[activeLessonIndex].quiz!.length > 0 ? (
+                    !lessonQuizComplete ? (
+                      <div className="space-y-4">
+                        {/* Active Question */}
                         <div className="space-y-3">
-                          <div className="p-3 bg-bento-bg border border-bento-secondary/15 rounded-xl text-[10px] leading-relaxed max-h-24 overflow-y-auto">
-                            <span className="font-bold text-bento-primary block">AI Explanation:</span>
-                            <LatexRenderer text={currentCurriculum.lessons[activeLessonIndex].quiz[lessonQuizQuestionIndex].explanation} />
-                          </div>
-                          <div className="flex justify-end">
-                            <button
-                              onClick={() => handleNextLessonQuizQuestion(currentCurriculum.lessons[activeLessonIndex].quiz.length)}
-                              className="px-4 py-2 bg-bento-primary hover:bg-bento-primary/95 text-bento-bg rounded-xl text-[10px] font-extrabold transition cursor-pointer border border-bento-primary/20"
-                            >
-                              {lessonQuizQuestionIndex + 1 === currentCurriculum.lessons[activeLessonIndex].quiz.length ? "Finish Assessment" : "Next Question"}
-                            </button>
+                          <LatexRenderer text={currentCurriculum.lessons[activeLessonIndex].quiz[lessonQuizQuestionIndex]?.question || ""} className="text-xs font-extrabold text-white leading-snug" />
+                          
+                          {/* Options list */}
+                          <div className="space-y-1.5">
+                            {(currentCurriculum.lessons[activeLessonIndex].quiz[lessonQuizQuestionIndex]?.options || []).map((opt, oIdx) => {
+                              const isAnswered = lessonQuizSelectedAnswer !== null;
+                              const isCorrect = oIdx === currentCurriculum.lessons[activeLessonIndex].quiz[lessonQuizQuestionIndex]?.answer;
+                              const isSelected = oIdx === lessonQuizSelectedAnswer;
+
+                              let optStyle = "border-bento-secondary/10 hover:border-bento-primary/40 bg-bento-bg/55 text-white";
+                              if (isAnswered) {
+                                if (isCorrect) {
+                                  optStyle = "border-emerald-500 bg-emerald-950/20 text-emerald-300 font-bold";
+                                } else if (isSelected) {
+                                  optStyle = "border-rose-500 bg-rose-950/20 text-rose-300 font-bold";
+                                } else {
+                                  optStyle = "border-bento-secondary/5 opacity-40";
+                                }
+                              }
+
+                              return (
+                                <button
+                                  key={oIdx}
+                                  onClick={() => handleSelectLessonQuizOption(oIdx, currentCurriculum.lessons[activeLessonIndex].quiz?.[lessonQuizQuestionIndex]?.answer || 0)}
+                                  disabled={isAnswered}
+                                  className={`w-full text-left px-3 py-2 border rounded-xl text-[11px] font-semibold transition cursor-pointer ${optStyle}`}
+                                >
+                                  <LatexRenderer text={opt} inline={true} />
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
-                      )}
-                    </div>
-                  ) : (
-                    /* Assessment complete state */
-                    <div className="text-center py-4 space-y-4">
-                      <Award className="w-8 h-8 text-emerald-400 mx-auto" />
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-bold text-white block">Assessment Concluded!</span>
-                        <span className="text-xs font-black text-bento-primary block">
-                          You scored {lessonQuizScore} of {currentCurriculum.lessons[activeLessonIndex].quiz.length}
-                        </span>
+
+                        {/* AI explanation and Next buttons */}
+                        {lessonQuizSelectedAnswer !== null && (
+                          <div className="space-y-3">
+                            <div className="p-3 bg-bento-bg border border-bento-secondary/15 rounded-xl text-[10px] leading-relaxed max-h-24 overflow-y-auto">
+                              <span className="font-bold text-bento-primary block">AI Explanation:</span>
+                              <LatexRenderer text={currentCurriculum.lessons[activeLessonIndex].quiz[lessonQuizQuestionIndex]?.explanation || ""} />
+                            </div>
+                            <div className="flex justify-end">
+                              <button
+                                onClick={() => handleNextLessonQuizQuestion(currentCurriculum.lessons[activeLessonIndex].quiz?.length || 0)}
+                                className="px-4 py-2 bg-bento-primary hover:bg-bento-primary/95 text-bento-bg rounded-xl text-[10px] font-extrabold transition cursor-pointer border border-bento-primary/20"
+                              >
+                                {lessonQuizQuestionIndex + 1 === (currentCurriculum.lessons[activeLessonIndex].quiz?.length || 0) ? "Finish Assessment" : "Next Question"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <button
-                        onClick={handleResetLessonQuiz}
-                        className="px-3.5 py-1.5 bg-bento-bg border border-bento-secondary/15 hover:border-bento-primary/30 text-[10px] font-bold text-white rounded-lg transition cursor-pointer flex items-center gap-1 mx-auto"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Retake quiz</span>
-                      </button>
+                    ) : (
+                      /* Assessment complete state */
+                      <div className="text-center py-4 space-y-4">
+                        <Award className="w-8 h-8 text-emerald-400 mx-auto" />
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold text-white block">Assessment Concluded!</span>
+                          <span className="text-xs font-black text-bento-primary block">
+                            You scored {lessonQuizScore} of {currentCurriculum.lessons[activeLessonIndex].quiz?.length || 0}
+                          </span>
+                        </div>
+                        <button
+                          onClick={handleResetLessonQuiz}
+                          className="px-3.5 py-1.5 bg-bento-bg border border-bento-secondary/15 hover:border-bento-primary/30 text-[10px] font-bold text-white rounded-lg transition cursor-pointer flex items-center gap-1 mx-auto"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Retake quiz</span>
+                        </button>
+                      </div>
+                    )
+                  ) : (
+                    <div className="text-center py-6 text-bento-text-muted text-xs">
+                      No quiz compiled for this unit.
                     </div>
                   )}
-                </div>
-
-              </div>
+                  </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

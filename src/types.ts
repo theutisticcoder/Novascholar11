@@ -149,15 +149,15 @@ export interface CurriculumLesson {
   id: string;
   title: string;
   duration: string;
-  explanation: string;
-  conceptGraph: ConceptGraph;
-  quiz: {
+  explanation?: string;
+  conceptGraph?: ConceptGraph;
+  quiz?: {
     question: string;
     options: string[];
     answer: number;
     explanation: string;
   }[];
-  flashcards: {
+  flashcards?: {
     front: string;
     back: string;
   }[];

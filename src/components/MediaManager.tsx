@@ -57,6 +57,10 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
         type = "audio";
         endpoint = "/api/gemini/transcribe";
         payloadKey = "audioBase64";
+      } else if (file.type === "application/pdf") {
+        type = "document";
+        endpoint = "/api/gemini/pdf-notes";
+        payloadKey = "pdfBase64";
       }
 
       let transcription = "";
@@ -199,7 +203,7 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
           ref={fileInputRef}
           type="file"
           className="hidden"
-          accept="image/*,audio/*,text/plain"
+          accept="image/*,audio/*,text/plain,application/pdf"
           onChange={handleInputChange}
         />
 
@@ -218,7 +222,7 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
             or drag and drop
           </div>
           <p className="text-xs text-slate-500">
-            Images (OCR / Math equations), Audio (Speech Transcripts), or Text (.txt)
+            Images (OCR), Audio (Transcripts), PDF Docs, or Text (.txt)
           </p>
         </div>
       </div>

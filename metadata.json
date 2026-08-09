@@ -1,6 +1,6 @@
 {
   "name": "Novascholar",
-  "description": "An integrated academic management and AI-powered study suite featuring a student dashboard, an interactive calendar with .ics export, Cornell & outline course notes, handwriting canvases, real-time LaTeX, multimodal AI companions, OCR, speech transcribers, grade trackers, and goal roadmap managers.",
+  "description": "An integrated academic management and AI-powered study suite featuring a student dashboard, an interactive calendar with .ics export, Cornell & outline course notes with PDF document support, handwriting canvases, real-time LaTeX, multimodal AI companions, OCR, speech transcribers, grade trackers, and goal roadmap managers.",
   "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
