@@ -51,7 +51,7 @@ function getAiClient(): GoogleGenAI {
 const FALLBACK_MODELS = [
   "gemini-3.5-flash-lite", // 3.5 flash-lite (Primary)
   "gemini-3.1-flash-lite", // 3.1 flash-lite (Secondary)
-  "gemini-1.5-flash"       // Standard Flash fallback
+  "gemini-2.5-flash-lite"       // Standard Flash fallback
 ];
 
 async function callGeminiWithFallback(config: {
