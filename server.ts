@@ -391,7 +391,7 @@ app.post("/api/gemini/curriculum", async (req, res) => {
         `1. A Title.\n` +
         `2. A short duration estimate (e.g. "15 mins").\n` +
         `3. A unique ID (e.g. "topic-${existingCount + 1}").\n\n` +
-        `Respond with a JSON object matching the defined curriculum skeleton schema. Keep curriculumTitle and curriculumOverview consistent or complementary to the subject.`;
+        `Respond with a JSON object matching the defined curriculum skeleton schema. Keep curriculumTitle and curriculumOverview consistent or complementary to the subject. Each lesson content should provide in depth content and at least 2 real examples (math/english) or real world scenarios (other topics) of the topic.`;
     } else {
       promptText = `You are an academic curriculum designer. Generate the FIRST 10 sequential, distinct lessons/topics for a comprehensive academic Curriculum Skeleton for the subject: "${subject}".\n` +
         `We plan to build a complete curriculum of 25-30 topics in multiple generations (generating 10 lessons at a time).\n` +
@@ -400,7 +400,7 @@ app.post("/api/gemini/curriculum", async (req, res) => {
         `1. A Title.\n` +
         `2. A short duration estimate (e.g. "15 mins").\n` +
         `3. A unique ID (e.g. "topic-1").\n\n` +
-        `Respond with a JSON object matching the defined curriculum skeleton schema. Provide a descriptive curriculumTitle and curriculumOverview.`;
+        `Respond with a JSON object matching the defined curriculum skeleton schema. Provide a descriptive curriculumTitle and curriculumOverview. Each lesson content should provide in depth content and at least 2 real examples (math/english) or real world scenarios (other topics) of the topic.`;
     }
 
     if (pdfBase64) {
