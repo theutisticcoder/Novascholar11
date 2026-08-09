@@ -34,7 +34,7 @@ let aiClient: GoogleGenAI | null = null;
 
 function getAiClient(): GoogleGenAI {
   if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY || "AI_STUDIO_DEFAULT_KEY";
     aiClient = new GoogleGenAI({
       apiKey,
       httpOptions: {
@@ -51,7 +51,7 @@ function getAiClient(): GoogleGenAI {
 const FALLBACK_MODELS = [
   "gemini-3.5-flash-lite", // 3.5 flash-lite (Primary)
   "gemini-3.1-flash-lite", // 3.1 flash-lite (Secondary)
-  "gemini-2.5-flash-lite"       // Standard Flash fallback
+  "gemini-1.5-flash"       // Standard Flash fallback
 ];
 
 async function callGeminiWithFallback(config: {
@@ -369,26 +369,59 @@ app.post("/api/gemini/latex-helper", async (req, res) => {
   }
 });
 
-// 7. AI Curriculum Structure Builder (25-30 topics)
+// 7. AI Curriculum Structure Builder (generates 10 topics at a time, up to 25-30 total)
 app.post("/api/gemini/curriculum", async (req, res) => {
   try {
-    const { subject, notesContent } = req.body;
+    const { subject, notesContent, pdfBase64, existingLessons } = req.body;
     if (!subject) {
       return res.status(400).json({ error: "Missing subject in request body." });
     }
 
-    const promptText = `Generate a fully integrated, comprehensive academic Curriculum Skeleton for the subject: "${subject}".\n` +
-      `Below is the raw note content provided as background context:\n` +
-      `--- CONTEXT NOTES START ---\n${notesContent || "No context notes provided. Generate a full foundational curriculum based on standard collegiate syllabus."}\n--- CONTEXT NOTES END ---\n\n` +
-      `Your output must divide this subject into exactly 25-30 distinct, logical, chronological Topics/Lessons.\n` +
-      `For EACH topic, provide:\n` +
-      `1. A Title.\n` +
-      `2. A short duration estimate (e.g. "15 mins").\n` +
-      `3. A unique ID (e.g. "topic-1").\n\n` +
-      `Respond with a JSON object matching the defined curriculum skeleton schema.`;
+    const hasExisting = Array.isArray(existingLessons) && existingLessons.length > 0;
+    const existingCount = hasExisting ? existingLessons.length : 0;
+
+    let promptText = "";
+    if (hasExisting) {
+      promptText = `You are an academic curriculum designer. We are incrementally building a detailed curriculum of 25-30 topics for the subject: "${subject}".\n` +
+        `We have already generated the first ${existingCount} lessons/topics:\n` +
+        existingLessons.map((l: any, i: number) => ` - Unit ${i + 1}: ${l.title}`).join("\n") + "\n\n" +
+        `Now, please generate the NEXT 10 sequential, distinct lessons/topics for this curriculum.\n` +
+        `Ensure these continuation topics flow logically, do not repeat existing ones, and are numbered starting from Unit ${existingCount + 1}.\n` +
+        `For EACH of these 10 new lessons/topics, provide:\n` +
+        `1. A Title.\n` +
+        `2. A short duration estimate (e.g. "15 mins").\n` +
+        `3. A unique ID (e.g. "topic-${existingCount + 1}").\n\n` +
+        `Respond with a JSON object matching the defined curriculum skeleton schema. Keep curriculumTitle and curriculumOverview consistent or complementary to the subject.`;
+    } else {
+      promptText = `You are an academic curriculum designer. Generate the FIRST 10 sequential, distinct lessons/topics for a comprehensive academic Curriculum Skeleton for the subject: "${subject}".\n` +
+        `We plan to build a complete curriculum of 25-30 topics in multiple generations (generating 10 lessons at a time).\n` +
+        `Make sure this first batch sets up a strong foundation and is ready for subsequent expansion.\n` +
+        `For EACH of these first 10 lessons/topics, provide:\n` +
+        `1. A Title.\n` +
+        `2. A short duration estimate (e.g. "15 mins").\n` +
+        `3. A unique ID (e.g. "topic-1").\n\n` +
+        `Respond with a JSON object matching the defined curriculum skeleton schema. Provide a descriptive curriculumTitle and curriculumOverview.`;
+    }
+
+    if (pdfBase64) {
+      promptText += `\n\nUse the attached PDF document as the primary curriculum source. Extract and align the topics directly with the material, chapters, or units present in this PDF context.`;
+    } else if (notesContent) {
+      promptText += `\n\nUse the following course notes as context:\n--- NOTES CONTEXT ---\n${notesContent}\n--- NOTES CONTEXT ---`;
+    }
+
+    const contents: any[] = [];
+    if (pdfBase64) {
+      contents.push({
+        inlineData: {
+          mimeType: "application/pdf",
+          data: pdfBase64
+        }
+      });
+    }
+    contents.push(promptText);
 
     const response = await callGeminiWithFallback({
-      contents: promptText,
+      contents: contents,
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,

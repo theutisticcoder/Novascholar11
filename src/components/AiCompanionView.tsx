@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Sparkles, Loader2, Play, CheckCircle2, XCircle, RotateCcw, AlertTriangle, ArrowRight, HelpCircle, Check, BookOpen, Layers, Award, Plus, Bookmark } from "lucide-react";
+import React, { useState, useRef } from "react";
+import { Sparkles, Loader2, Play, CheckCircle2, XCircle, RotateCcw, AlertTriangle, ArrowRight, HelpCircle, Check, BookOpen, Layers, Award, Plus, Bookmark, Upload, FileText } from "lucide-react";
 import { Course, Note, Quiz, QuizQuestion, Flashcard, StudyGuide, Curriculum, CurriculumLesson } from "../types";
 import LatexRenderer from "./LatexRenderer";
 import ConceptGraphVisualizer from "./ConceptGraphVisualizer";
@@ -45,7 +45,28 @@ export default function AiCompanionView({
   const [isFlipped, setIsFlipped] = useState(false);
 
   // Curriculum Studio States
-  const [generatedCurriculums, setGeneratedCurriculums] = useState<{ [courseId: string]: Curriculum }>({});
+  const [generatedCurriculums, setGeneratedCurriculums] = useState<{ [courseId: string]: Curriculum }>(() => {
+    const saved = localStorage.getItem("ns_generated_curriculums");
+    try {
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      console.error("Error reading saved curriculums:", e);
+      return {};
+    }
+  });
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"saved" | "saving" | "idle">("idle");
+
+  React.useEffect(() => {
+    if (Object.keys(generatedCurriculums).length > 0) {
+      setAutoSaveStatus("saving");
+      localStorage.setItem("ns_generated_curriculums", JSON.stringify(generatedCurriculums));
+      const timer = setTimeout(() => {
+        setAutoSaveStatus("saved");
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [generatedCurriculums]);
+
   const [activeLessonIndex, setActiveLessonIndex] = useState<number>(0);
   const [loadingLessonContent, setLoadingLessonContent] = useState<boolean>(false);
   const [curriculumFlashcardFlipped, setCurriculumFlashcardFlipped] = useState<boolean>(false);
@@ -58,6 +79,39 @@ export default function AiCompanionView({
   const [lessonQuizComplete, setLessonQuizComplete] = useState<boolean>(false);
 
   const [exportSuccessMessage, setExportSuccessMessage] = useState<string | null>(null);
+
+  // Curriculum PDF and Continuation source states
+  const [curriculumSourceType, setCurriculumSourceType] = useState<"notes" | "pdf">("notes");
+  const [curriculumPdfBase64, setCurriculumPdfBase64] = useState<string | null>(null);
+  const [curriculumPdfName, setCurriculumPdfName] = useState<string | null>(null);
+  const [extendingCurriculum, setExtendingCurriculum] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const base64String = reader.result as string;
+        resolve(base64String.split(",")[1]);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  const handlePdfUploadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      try {
+        const base64 = await fileToBase64(file);
+        setCurriculumPdfBase64(base64);
+        setCurriculumPdfName(file.name);
+      } catch (err: any) {
+        console.error("PDF Read Error:", err);
+        setError("Could not parse the PDF file.");
+      }
+    }
+  };
 
   const activeCourse = courses.find((c) => c.id === selectedCourseId);
   const activeCourseNotes = notes.filter((n) => n.courseId === selectedCourseId);
@@ -81,13 +135,20 @@ export default function AiCompanionView({
     setLessonQuizComplete(false);
 
     try {
+      const payload: any = {
+        subject: activeCourse.name,
+      };
+
+      if (curriculumSourceType === "pdf" && curriculumPdfBase64) {
+        payload.pdfBase64 = curriculumPdfBase64;
+      } else {
+        payload.notesContent = getNotesContextText();
+      }
+
       const response = await fetch("/api/gemini/curriculum", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: activeCourse.name,
-          notesContent: getNotesContextText()
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
@@ -118,6 +179,77 @@ export default function AiCompanionView({
       setError(err.message || "An error occurred during Gemini curriculum compiling.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExtendCurriculum = async () => {
+    const currentCurriculum = generatedCurriculums[selectedCourseId];
+    if (!activeCourse || !currentCurriculum) return;
+
+    setExtendingCurriculum(true);
+    setError(null);
+
+    try {
+      const payload: any = {
+        subject: activeCourse.name,
+        existingLessons: currentCurriculum.lessons.map((l) => ({ title: l.title }))
+      };
+
+      if (curriculumSourceType === "pdf" && curriculumPdfBase64) {
+        payload.pdfBase64 = curriculumPdfBase64;
+      } else {
+        payload.notesContent = getNotesContextText();
+      }
+
+      const response = await fetch("/api/gemini/curriculum", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Failed to generate continuation lessons.");
+      }
+
+      const data = await response.json();
+      const newLessons: CurriculumLesson[] = data.lessons || [];
+      
+      // Ensure unique IDs
+      const startIdx = currentCurriculum.lessons.length;
+      const formattedNewLessons = newLessons.map((l, idx) => ({
+        ...l,
+        id: `topic-${startIdx + 1 + idx}`
+      }));
+
+      const updatedCurriculum: Curriculum = {
+        ...currentCurriculum,
+        lessons: [...currentCurriculum.lessons, ...formattedNewLessons]
+      };
+
+      setGeneratedCurriculums((prev) => ({
+        ...prev,
+        [selectedCourseId]: updatedCurriculum
+      }));
+
+      // Set the active index to the first of the newly loaded lessons
+      setActiveLessonIndex(startIdx);
+      setCurriculumFlashcardIndex(0);
+      setCurriculumFlashcardFlipped(false);
+      setLessonQuizQuestionIndex(0);
+      setLessonQuizSelectedAnswer(null);
+      setLessonQuizScore(0);
+      setLessonQuizComplete(false);
+
+      // Auto-load the content of that first new lesson
+      if (formattedNewLessons.length > 0) {
+        handleLoadLessonContent(updatedCurriculum, startIdx);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "An error occurred extending curriculum lessons.");
+    } finally {
+      setExtendingCurriculum(false);
     }
   };
 
@@ -814,20 +946,118 @@ export default function AiCompanionView({
 
       {/* MODE 0: INTEGRATED CURRICULUM STUDIO */}
       {!loading && activeMode === "curriculum" && !currentCurriculum && (
-        <div className="bg-bento-card border border-bento-secondary/15 rounded-3xl p-12 text-center text-bento-text-muted shadow-sm max-w-xl mx-auto space-y-4">
-          <Layers className="w-12 h-12 text-bento-primary mx-auto animate-pulse" />
-          <h3 className="text-base font-extrabold text-white">Consolidated Curriculum & Lesson Studio</h3>
-          <p className="text-xs text-bento-text-muted/85 leading-relaxed font-medium">
-            Generate a fully unified Academic Curriculum for <span className="text-bento-primary font-bold">{activeCourse?.name}</span>. 
-            This builds 3 comprehensive lesson chunks with mathematical explanation cards, 
-            multimedia concept graph layouts, interactive flashcards, and dedicated lesson mini-quizzes!
-          </p>
+        <div className="bg-bento-card border border-bento-secondary/15 rounded-3xl p-8 text-bento-text-muted shadow-sm max-w-xl mx-auto space-y-6">
+          <div className="text-center space-y-3">
+            <Layers className="w-12 h-12 text-bento-primary mx-auto animate-pulse" />
+            <h3 className="text-base font-extrabold text-white">Consolidated Curriculum & Lesson Studio</h3>
+            <p className="text-xs text-bento-text-muted/85 leading-relaxed font-medium">
+              Design a sequential, high-fidelity academic syllabus of <span className="text-bento-primary font-bold">25-30 topics</span> for <span className="text-white font-bold">{activeCourse?.name}</span>.
+              To guarantee extreme detail and avoid time-outs, lessons are compiled in batches of <span className="text-bento-primary font-bold">10 units at a time</span>.
+            </p>
+          </div>
+
+          {/* Curriculum source type selection */}
+          <div className="space-y-2">
+            <label className="text-[10px] uppercase tracking-wider text-bento-secondary font-bold block text-left">
+              Curriculum Core Resource Source
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setCurriculumSourceType("notes")}
+                className={`py-2.5 px-4 text-xs font-bold rounded-xl border transition cursor-pointer flex items-center justify-center gap-2 ${
+                  curriculumSourceType === "notes"
+                    ? "bg-bento-primary/10 border-bento-primary text-white"
+                    : "bg-bento-bg border-bento-secondary/10 text-bento-text-muted hover:text-white"
+                }`}
+              >
+                <BookOpen className="w-4 h-4 text-bento-primary" />
+                <span>Existing Course Notes</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurriculumSourceType("pdf")}
+                className={`py-2.5 px-4 text-xs font-bold rounded-xl border transition cursor-pointer flex items-center justify-center gap-2 ${
+                  curriculumSourceType === "pdf"
+                    ? "bg-bento-primary/10 border-bento-primary text-white"
+                    : "bg-bento-bg border-bento-secondary/10 text-bento-text-muted hover:text-white"
+                }`}
+              >
+                <Upload className="w-4 h-4 text-bento-primary" />
+                <span>Upload PDF Document</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Conditional Input Rendering */}
+          {curriculumSourceType === "notes" ? (
+            <div className="p-4 bg-bento-bg border border-bento-secondary/10 rounded-2xl text-left space-y-1.5">
+              <span className="text-[10px] font-bold text-white uppercase tracking-wider block">Course Notes Context</span>
+              <p className="text-[11px] text-bento-text-muted/80 leading-relaxed font-sans">
+                {activeCourseNotes.length > 0 
+                  ? `Found ${activeCourseNotes.length} active notes for this subject. Gemini will analyze their structure, formulas, and definitions to design the units.`
+                  : "No notes found for this course. Gemini will draft a premium, standalone foundational collegiate-level syllabus instead."}
+              </p>
+            </div>
+          ) : (
+            <div className="p-4 bg-bento-bg border border-bento-secondary/10 rounded-2xl text-left space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-white uppercase tracking-wider">Multimodal PDF Extractor</span>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-2.5 py-1 bg-bento-card border border-bento-secondary/25 text-[10px] font-extrabold text-white rounded-lg hover:border-bento-primary/40 transition cursor-pointer"
+                >
+                  Browse PDF
+                </button>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                onChange={handlePdfUploadChange}
+                className="hidden"
+              />
+
+              {curriculumPdfName ? (
+                <div className="p-3 bg-bento-primary/5 border border-bento-primary/20 rounded-xl flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileText className="w-4 h-4 text-bento-primary shrink-0" />
+                    <span className="text-xs text-white font-bold truncate">{curriculumPdfName}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurriculumPdfBase64(null);
+                      setCurriculumPdfName(null);
+                    }}
+                    className="text-[10px] text-rose-400 hover:text-rose-300 font-bold uppercase transition"
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : (
+                <div 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border border-dashed border-bento-secondary/20 hover:border-bento-primary/30 rounded-xl p-5 text-center cursor-pointer transition space-y-1 bg-bento-card/40"
+                >
+                  <Upload className="w-6 h-6 text-bento-secondary/40 mx-auto" />
+                  <span className="text-[11px] font-bold text-white block">Drop or select your syllabus PDF</span>
+                  <span className="text-[10px] text-bento-text-muted/60 block">We'll convert the PDF directly into curriculum lessons</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Action button */}
           <button
             onClick={handleGenerateCurriculum}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-bento-primary text-bento-bg text-xs font-bold rounded-xl hover:bg-bento-primary/90 transition shadow-lg border border-bento-primary/30"
+            disabled={curriculumSourceType === "pdf" && !curriculumPdfBase64}
+            className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-bento-primary text-bento-bg text-xs font-black rounded-xl hover:bg-bento-primary/95 transition shadow-lg border border-bento-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-            <Sparkles className="w-4 h-4 text-bento-bg" />
-            <span>Generate Curriculum Now</span>
+            <Sparkles className="w-4 h-4 text-bento-bg animate-pulse" />
+            <span>Generate First 10 Lessons</span>
           </button>
         </div>
       )}
@@ -842,9 +1072,13 @@ export default function AiCompanionView({
             
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-bento-secondary/10 pb-4">
               <div>
-                <h2 className="text-lg font-black text-white flex items-center gap-2">
+                <h2 className="text-lg font-black text-white flex flex-wrap items-center gap-2">
                   <Layers className="w-5 h-5 text-bento-primary" />
-                  {currentCurriculum.curriculumTitle}
+                  <span>{currentCurriculum.curriculumTitle}</span>
+                  <span className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-950/40 border border-emerald-500/20 text-emerald-400 font-extrabold rounded-lg select-none">
+                    <span className={`w-1.5 h-1.5 rounded-full bg-emerald-400 ${autoSaveStatus === "saving" ? "animate-ping" : "animate-pulse"}`}></span>
+                    <span>{autoSaveStatus === "saving" ? "Saving..." : "Auto-saved"}</span>
+                  </span>
                 </h2>
                 <p className="text-xs text-bento-text-muted font-medium mt-1 leading-relaxed max-w-2xl">
                   {currentCurriculum.curriculumOverview}
@@ -928,6 +1162,30 @@ export default function AiCompanionView({
                     );
                   })}
                 </div>
+
+                {currentCurriculum.lessons.length < 30 ? (
+                  <button
+                    onClick={handleExtendCurriculum}
+                    disabled={extendingCurriculum}
+                    className="w-full mt-3 flex items-center justify-center gap-2 py-2.5 bg-bento-primary/10 hover:bg-bento-primary/20 border border-bento-primary/30 hover:border-bento-primary/50 text-bento-primary text-xs font-extrabold rounded-2xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    {extendingCurriculum ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-bento-primary" />
+                        <span>Compiling Units {currentCurriculum.lessons.length + 1}-{currentCurriculum.lessons.length + 10}...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Generate Next 10 Topics ({currentCurriculum.lessons.length}/30)</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <div className="text-center p-2 text-[10px] text-emerald-400 font-extrabold tracking-wider bg-emerald-950/20 border border-emerald-500/20 rounded-xl mt-3">
+                    ✨ FULL 30-UNIT CURRICULUM BUILT!
+                  </div>
+                )}
               </div>
 
               {/* Lesson Specific Action Desk */}
