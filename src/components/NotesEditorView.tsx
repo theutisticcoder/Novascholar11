@@ -37,6 +37,18 @@ export default function NotesEditorView({
   const [newNoteType, setNewNoteType] = useState<NoteType>("cornell");
   const [newNoteCourseId, setNewNoteCourseId] = useState(courses[0]?.id || "");
 
+  // Edit Note states
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editNoteId, setEditNoteId] = useState("");
+  const [editNoteTitle, setEditNoteTitle] = useState("");
+  const [editNoteCourseId, setEditNoteCourseId] = useState("");
+  const [editNoteType, setEditNoteType] = useState<NoteType>("cornell");
+
+  // JSON Import States
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importJsonText, setImportJsonText] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+
   // Local Cornell Cue Form
   const [newCueText, setNewCueText] = useState("");
   const [selectedLineForCue, setSelectedLineForCue] = useState(0);
@@ -72,6 +84,59 @@ export default function NotesEditorView({
     // Reset Form
     setNewNoteTitle("");
     setShowAddNote(false);
+  };
+
+  const handleSaveNoteEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editNoteTitle) return;
+
+    const original = notes.find((n) => n.id === editNoteId);
+    if (!original) return;
+
+    onUpdateNote({
+      ...original,
+      title: editNoteTitle,
+      courseId: editNoteCourseId,
+      type: editNoteType
+    });
+
+    setShowEditModal(false);
+  };
+
+  const handleExportNotesJson = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(notes, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", "novascholar_notes.json");
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleImportNotes = () => {
+    try {
+      const parsed = JSON.parse(importJsonText);
+      const list = Array.isArray(parsed) ? parsed : [parsed];
+
+      for (const item of list) {
+        if (!item.title || !item.type) {
+          throw new Error("Invalid note structure. Each note must have a 'title' and a 'type' field.");
+        }
+        if (!item.id) {
+          item.id = `note-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        }
+        if (item.media === undefined) {
+          item.media = [];
+        }
+      }
+
+      list.forEach((n) => onAddNote(n));
+      setImportJsonText("");
+      setShowImportModal(false);
+      setImportError(null);
+    } catch (e: any) {
+      setImportError(e.message || "Invalid JSON syntax.");
+    }
   };
 
   const handleUpdateContent = (text: string) => {
@@ -224,15 +289,36 @@ export default function NotesEditorView({
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
       {/* Sidebar - Note inventories (Left 3 Columns) */}
       <div className="lg:col-span-3 space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between border-b border-bento-secondary/10 pb-2 flex-wrap gap-2">
           <h3 className="text-xs font-bold text-bento-secondary uppercase tracking-wider">Academic Notes</h3>
-          <button
-            onClick={() => setShowAddNote(true)}
-            className="flex items-center gap-1 px-3 py-1.5 bg-bento-primary hover:bg-bento-primary/90 text-bento-bg rounded-xl text-xs font-bold transition shadow-[0_0_12px_rgba(102,252,241,0.2)] border border-bento-primary/15 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>Create</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleExportNotesJson}
+              className="p-1 bg-bento-secondary/10 border border-bento-secondary/20 hover:border-bento-primary/45 text-bento-text-muted hover:text-white rounded-md transition cursor-pointer"
+              title="Export Notes Backup (JSON)"
+            >
+              <svg className="w-3.5 h-3.5 text-bento-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            </button>
+            <button
+              onClick={() => {
+                setImportJsonText("");
+                setImportError(null);
+                setShowImportModal(true);
+              }}
+              className="p-1 bg-bento-primary/10 border border-bento-primary/25 text-bento-primary rounded-md transition cursor-pointer"
+              title="Import Notes Backup (JSON)"
+            >
+              <svg className="w-3.5 h-3.5 text-bento-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            </button>
+            <button
+              onClick={() => setShowAddNote(true)}
+              className="flex items-center gap-0.5 px-2 py-1 bg-bento-primary hover:bg-bento-primary/90 text-bento-bg rounded-md text-[10px] font-black transition cursor-pointer"
+              title="Create standard Note"
+            >
+              <Plus className="w-3 h-3 stroke-[3]" />
+              <span>New</span>
+            </button>
+          </div>
         </div>
 
         <div className="space-y-2.5 max-h-[500px] overflow-y-auto">
@@ -279,9 +365,22 @@ export default function NotesEditorView({
             {/* Header section with note meta */}
             <div className="p-4 bg-bento-bg border-b border-bento-secondary/10 flex flex-wrap items-center justify-between gap-4">
               <div>
-                <h2 className="text-base font-extrabold text-white flex items-center gap-2">
+                <h2 className="text-base font-extrabold text-white flex items-center gap-2 flex-wrap">
                   <FileText className="w-4.5 h-4.5 text-bento-primary" />
                   <span>{activeNote.title}</span>
+                  <button
+                    onClick={() => {
+                      setEditNoteId(activeNote.id);
+                      setEditNoteTitle(activeNote.title);
+                      setEditNoteCourseId(activeNote.courseId);
+                      setEditNoteType(activeNote.type);
+                      setShowEditModal(true);
+                    }}
+                    className="p-1 text-bento-secondary hover:text-bento-primary rounded hover:bg-bento-card/45 transition cursor-pointer"
+                    title="Rename / Change note method"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
                 </h2>
                 <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-bento-text-muted">
                   <span className="px-1.5 py-0.5 rounded bg-bento-primary/10 border border-bento-primary/20 text-bento-primary font-bold uppercase tracking-wider text-[9px]">
@@ -690,6 +789,135 @@ export default function NotesEditorView({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Rename / Modify Note Info */}
+      {showEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-bento-card rounded-3xl border border-bento-secondary/25 shadow-[0_10px_30px_rgba(0,0,0,0.6)] w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-bento-secondary/10 pb-3">
+              <h3 className="text-base font-extrabold text-white">Modify Study Note Details</h3>
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="text-bento-text-muted hover:text-white text-xl cursor-pointer font-bold outline-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveNoteEdit} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Note Lecture Title</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Heuristics & Search Spaces"
+                  value={editNoteTitle}
+                  onChange={(e) => setEditNoteTitle(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Associated Course</label>
+                  <select
+                    value={editNoteCourseId}
+                    onChange={(e) => setEditNoteCourseId(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none text-sm cursor-pointer"
+                  >
+                    <option value="" className="bg-bento-bg text-white">General Notes</option>
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id} className="bg-bento-bg text-white">{c.code}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Study Method</label>
+                  <select
+                    value={editNoteType}
+                    onChange={(e) => setEditNoteType(e.target.value as NoteType)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none text-sm cursor-pointer"
+                  >
+                    <option value="cornell" className="bg-bento-bg text-white">Cornell Method</option>
+                    <option value="outline" className="bg-bento-bg text-white">Outline Method</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-bento-secondary/10">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="px-4 py-2 border border-bento-secondary/20 text-bento-text-muted rounded-xl text-xs font-bold hover:bg-bento-bg cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-bento-primary hover:bg-bento-primary/95 text-bento-bg rounded-xl text-xs font-bold shadow-sm cursor-pointer transition"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Import Study Notes */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-bento-card rounded-3xl border border-bento-secondary/25 shadow-[0_10px_30px_rgba(0,0,0,0.6)] w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-bento-secondary/10 pb-3">
+              <h3 className="text-base font-extrabold text-white">Import Study Notes</h3>
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                className="text-bento-text-muted hover:text-white text-xl cursor-pointer font-bold outline-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-xs text-bento-text-muted leading-relaxed">
+                Paste raw study notes JSON array data to merge backup sheets into your active NovaScholar workbook.
+              </p>
+
+              {importError && (
+                <div className="p-3 bg-rose-950/20 border border-rose-500/25 rounded-xl text-[11px] text-rose-300 font-bold">
+                  ⚠️ {importError}
+                </div>
+              )}
+
+              <textarea
+                rows={6}
+                value={importJsonText}
+                onChange={(e) => setImportJsonText(e.target.value)}
+                placeholder='e.g.&#10;[&#10;  {&#10;    "title": "Quantum Mechanical States",&#10;    "courseId": "phys-301",&#10;    "type": "cornell",&#10;    "date": "2026-07-28",&#10;    "content": "### Spin States\nState vectors represent quantum variables..."&#10;  }&#10;]'
+                className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-xs font-mono leading-relaxed"
+              />
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-bento-secondary/10">
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(false)}
+                  className="px-4 py-2 border border-bento-secondary/20 text-bento-text-muted rounded-xl text-xs font-bold hover:bg-bento-bg cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImportNotes}
+                  className="px-4 py-2 bg-bento-primary hover:bg-bento-primary/95 text-bento-bg rounded-xl text-xs font-bold shadow-sm cursor-pointer transition"
+                >
+                  Merge Notebook
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

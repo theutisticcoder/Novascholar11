@@ -11,6 +11,8 @@ interface AiCompanionViewProps {
   onAddFlashcards: (cards: Flashcard[]) => void;
   onUpdateFlashcardStrength: (id: string, strength: "new" | "learning" | "mastered") => void;
   onAddNote?: (note: Note) => void;
+  onUpdateFlashcard?: (card: Flashcard) => void;
+  onRemoveFlashcard?: (id: string) => void;
 }
 
 export default function AiCompanionView({
@@ -19,7 +21,9 @@ export default function AiCompanionView({
   flashcards,
   onAddFlashcards,
   onUpdateFlashcardStrength,
-  onAddNote
+  onAddNote,
+  onUpdateFlashcard,
+  onRemoveFlashcard
 }: AiCompanionViewProps) {
   // Config selection states
   const [selectedCourseId, setSelectedCourseId] = useState<string>(courses[0]?.id || "");
@@ -43,6 +47,7 @@ export default function AiCompanionView({
   // Active Flashcards Deck State
   const [activeCardIndex, setActiveCardIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
+  const [curriculumProgressMsg, setCurriculumProgressMsg] = useState<string | null>(null);
 
   // Curriculum Studio States
   const [generatedCurriculums, setGeneratedCurriculums] = useState<{ [courseId: string]: Curriculum }>(() => {
@@ -86,6 +91,143 @@ export default function AiCompanionView({
   const [curriculumPdfName, setCurriculumPdfName] = useState<string | null>(null);
   const [extendingCurriculum, setExtendingCurriculum] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Edit Flashcard state variables
+  const [showEditFlashcard, setShowEditFlashcard] = useState(false);
+  const [editFlashcardId, setEditFlashcardId] = useState("");
+  const [editFlashcardFront, setEditFlashcardFront] = useState("");
+  const [editFlashcardBack, setEditFlashcardBack] = useState("");
+
+  // Edit Lesson state variables
+  const [showEditLesson, setShowEditLesson] = useState(false);
+  const [editLessonTitle, setEditLessonTitle] = useState("");
+  const [editLessonDuration, setEditLessonDuration] = useState("");
+  const [editLessonExplanation, setEditLessonExplanation] = useState("");
+
+  // Import JSON modals state variables
+  const [showCardImportModal, setShowCardImportModal] = useState(false);
+  const [showCurriculumImportModal, setShowCurriculumImportModal] = useState(false);
+  const [importJsonText, setImportJsonText] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+
+  const handleSaveFlashcardEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editFlashcardFront || !editFlashcardBack || !onUpdateFlashcard) return;
+
+    const original = flashcards.find((fc) => fc.id === editFlashcardId);
+    if (!original) return;
+
+    onUpdateFlashcard({
+      ...original,
+      front: editFlashcardFront,
+      back: editFlashcardBack
+    });
+
+    setShowEditFlashcard(false);
+  };
+
+  const handleSaveLessonEditDirect = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentCurriculum) return;
+
+    const updatedLessons = currentCurriculum.lessons.map((lesson, idx) => {
+      if (idx === activeLessonIndex) {
+        return {
+          ...lesson,
+          title: editLessonTitle,
+          duration: editLessonDuration,
+          explanation: editLessonExplanation
+        };
+      }
+      return lesson;
+    });
+
+    setGeneratedCurriculums((prev) => ({
+      ...prev,
+      [selectedCourseId]: {
+        ...currentCurriculum,
+        lessons: updatedLessons
+      }
+    }));
+
+    setShowEditLesson(false);
+  };
+
+  const handleExportFlashcardsJson = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(flashcards, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", "novascholar_flashcards.json");
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleImportFlashcards = () => {
+    try {
+      const parsed = JSON.parse(importJsonText);
+      const list = Array.isArray(parsed) ? parsed : [parsed];
+
+      for (const item of list) {
+        if (!item.front || !item.back) {
+          throw new Error("Invalid flashcard structure. Each card must have a 'front' and a 'back' field.");
+        }
+        if (!item.id) {
+          item.id = `fc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        }
+        if (!item.courseId) {
+          item.courseId = selectedCourseId;
+        }
+        if (!item.strength) {
+          item.strength = "new";
+        }
+      }
+
+      onAddFlashcards(list);
+      setImportJsonText("");
+      setShowCardImportModal(false);
+      setImportError(null);
+    } catch (e: any) {
+      setImportError(e.message || "Invalid JSON syntax.");
+    }
+  };
+
+  const handleExportCurriculumsJson = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(generatedCurriculums, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", "novascholar_curriculums.json");
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleImportCurriculums = () => {
+    try {
+      const parsed = JSON.parse(importJsonText);
+      if (typeof parsed !== "object" || parsed === null) {
+        throw new Error("Invalid curriculum backup. Root must be a key-value dictionary.");
+      }
+
+      for (const courseId in parsed) {
+        const curr = parsed[courseId];
+        if (!curr.curriculumTitle || !Array.isArray(curr.lessons)) {
+          throw new Error(`Invalid curriculum for course ${courseId}. Must contain a 'curriculumTitle' and a 'lessons' array.`);
+        }
+      }
+
+      setGeneratedCurriculums((prev) => ({
+        ...prev,
+        ...parsed
+      }));
+
+      setImportJsonText("");
+      setShowCurriculumImportModal(false);
+      setImportError(null);
+    } catch (e: any) {
+      setImportError(e.message || "Invalid JSON syntax.");
+    }
+  };
 
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -133,52 +275,155 @@ export default function AiCompanionView({
     setLessonQuizSelectedAnswer(null);
     setLessonQuizScore(0);
     setLessonQuizComplete(false);
+    setCurriculumProgressMsg("Compiling Chunk 1 of 3: Building Lessons 1-10 (Explanations, concept graphs, assessments)...");
+
+    let currentLessons: CurriculumLesson[] = [];
+    let title = `Curriculum: ${activeCourse.name}`;
+    let overview = "";
 
     try {
-      const payload: any = {
+      // --- CHUNK 1 (Lessons 1-10) ---
+      const payload1: any = {
         subject: activeCourse.name,
+        startIndex: 1,
+        existingLessons: []
       };
 
       if (curriculumSourceType === "pdf" && curriculumPdfBase64) {
-        payload.pdfBase64 = curriculumPdfBase64;
+        payload1.pdfBase64 = curriculumPdfBase64;
       } else {
-        payload.notesContent = getNotesContextText();
+        payload1.notesContent = getNotesContextText();
       }
 
-      const response = await fetch("/api/gemini/curriculum", {
+      const response1 = await fetch("/api/gemini/curriculum-chunk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload1)
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Failed to compile interactive curriculum.");
+      if (!response1.ok) {
+        const errData = await response1.json();
+        throw new Error(errData.error || "Failed to generate lesson chunk 1 (Units 1-10).");
       }
 
-      const data = await response.json();
-      const curriculum: Curriculum = {
-        id: `curr-${Date.now()}`,
-        curriculumTitle: data.curriculumTitle || `Curriculum: ${activeCourse.name}`,
-        curriculumOverview: data.curriculumOverview || "",
-        courseId: selectedCourseId,
-        lessons: data.lessons || []
-      };
-
-      setGeneratedCurriculums((prev) => ({
-        ...prev,
-        [selectedCourseId]: curriculum
+      const data1 = await response1.json();
+      title = data1.curriculumTitle || title;
+      overview = data1.curriculumOverview || overview;
+      currentLessons = (data1.lessons || []).map((l: any, idx: number) => ({
+        ...l,
+        id: `topic-${1 + idx}`
       }));
 
-      // Auto-load first lesson content
-      if (curriculum.lessons.length > 0) {
-        handleLoadLessonContent(curriculum, 0);
+      let activeCurriculum: Curriculum = {
+        id: `curr-${Date.now()}`,
+        curriculumTitle: title,
+        curriculumOverview: overview,
+        courseId: selectedCourseId,
+        lessons: currentLessons
+      };
+
+      // Set immediately so user sees initial progress
+      setGeneratedCurriculums((prev) => ({
+        ...prev,
+        [selectedCourseId]: activeCurriculum
+      }));
+
+      // --- CHUNK 2 (Lessons 11-20) ---
+      setCurriculumProgressMsg("Compiling Chunk 2 of 3: Extending to Lessons 11-20 (Explanations, concept graphs, assessments)...");
+      const payload2: any = {
+        subject: activeCourse.name,
+        startIndex: 11,
+        existingLessons: currentLessons.map(l => ({ title: l.title }))
+      };
+
+      if (curriculumSourceType === "pdf" && curriculumPdfBase64) {
+        payload2.pdfBase64 = curriculumPdfBase64;
+      } else {
+        payload2.notesContent = getNotesContextText();
+      }
+
+      const response2 = await fetch("/api/gemini/curriculum-chunk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload2)
+      });
+
+      if (!response2.ok) {
+        const errData = await response2.json();
+        throw new Error(errData.error || "Failed to generate lesson chunk 2 (Units 11-20).");
+      }
+
+      const data2 = await response2.json();
+      const lessons2 = (data2.lessons || []).map((l: any, idx: number) => ({
+        ...l,
+        id: `topic-${11 + idx}`
+      }));
+      currentLessons = [...currentLessons, ...lessons2];
+
+      activeCurriculum = {
+        ...activeCurriculum,
+        lessons: currentLessons
+      };
+
+      // Update state for second chunk
+      setGeneratedCurriculums((prev) => ({
+        ...prev,
+        [selectedCourseId]: activeCurriculum
+      }));
+
+      // --- CHUNK 3 (Lessons 21-30) ---
+      setCurriculumProgressMsg("Compiling Chunk 3 of 3: Finishing with Lessons 21-30 (Explanations, concept graphs, assessments)...");
+      const payload3: any = {
+        subject: activeCourse.name,
+        startIndex: 21,
+        existingLessons: currentLessons.map(l => ({ title: l.title }))
+      };
+
+      if (curriculumSourceType === "pdf" && curriculumPdfBase64) {
+        payload3.pdfBase64 = curriculumPdfBase64;
+      } else {
+        payload3.notesContent = getNotesContextText();
+      }
+
+      const response3 = await fetch("/api/gemini/curriculum-chunk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload3)
+      });
+
+      if (!response3.ok) {
+        const errData = await response3.json();
+        throw new Error(errData.error || "Failed to generate lesson chunk 3 (Units 21-30).");
+      }
+
+      const data3 = await response3.json();
+      const lessons3 = (data3.lessons || []).map((l: any, idx: number) => ({
+        ...l,
+        id: `topic-${21 + idx}`
+      }));
+      currentLessons = [...currentLessons, ...lessons3];
+
+      activeCurriculum = {
+        ...activeCurriculum,
+        lessons: currentLessons
+      };
+
+      // Update final state
+      setGeneratedCurriculums((prev) => ({
+        ...prev,
+        [selectedCourseId]: activeCurriculum
+      }));
+
+      // Trigger automatic selection of the first unit
+      if (currentLessons.length > 0) {
+        handleLoadLessonContent(activeCurriculum, 0);
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "An error occurred during Gemini curriculum compiling.");
+      setError(err.message || "An error occurred during sequential Gemini course chunk compiling.");
     } finally {
       setLoading(false);
+      setCurriculumProgressMsg(null);
     }
   };
 
@@ -646,14 +891,16 @@ export default function AiCompanionView({
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-bento-bg" />
-                <span>Generating AI deck...</span>
+                <span>
+                  {activeMode === "curriculum" ? "Compiling Chunks..." : "Generating AI deck..."}
+                </span>
               </>
             ) : (
               <>
                 <Sparkles className="w-4 h-4 text-bento-bg fill-bento-bg/20" />
                 <span>
                   {activeMode === "curriculum"
-                    ? "Compile Curriculum"
+                    ? "Compile 30-Unit Course"
                     : activeMode === "guide"
                     ? "Generate Guide"
                     : activeMode === "quiz"
@@ -676,13 +923,27 @@ export default function AiCompanionView({
 
       {/* Loading Block Screen */}
       {loading && (
-        <div className="bg-bento-card border border-bento-secondary/15 rounded-3xl p-12 text-center shadow-md space-y-4">
+        <div className="bg-bento-card border border-bento-secondary/15 rounded-3xl p-12 text-center shadow-md space-y-4 animate-pulse">
           <Loader2 className="w-10 h-10 animate-spin text-bento-primary mx-auto" />
           <div className="max-w-md mx-auto">
-            <h3 className="text-base font-extrabold text-white">Compiling Course Syllabi and Lectures...</h3>
-            <p className="text-xs text-bento-text-muted/80 mt-1.5 leading-relaxed">
-              We are utilizing Mistral AI (mistral-small-2506) to parse through your {activeCourseNotes.length} active notes, extracting key definitions, compiling LaTeX equations, and structuring active-recall questions. Please wait.
-            </p>
+            {activeMode === "curriculum" && curriculumProgressMsg ? (
+              <>
+                <h3 className="text-base font-extrabold text-white">Generating Complete Course...</h3>
+                <p className="text-xs text-bento-text-muted/90 mt-3 font-mono bg-bento-bg p-4 rounded-2xl border border-bento-secondary/15 leading-relaxed text-bento-primary">
+                  {curriculumProgressMsg}
+                </p>
+                <p className="text-[10px] text-bento-text-muted/65 mt-3">
+                  Gemini is building all lectures, interactive concept visualizers, mini-quizzes, and flashcards in parallel blocks to fit token limits. Please do not close this window.
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 className="text-base font-extrabold text-white">Compiling Course Syllabi and Lectures...</h3>
+                <p className="text-xs text-bento-text-muted/80 mt-1.5 leading-relaxed">
+                  We are utilizing Gemini AI to parse through your active notes, extracting key definitions, compiling LaTeX equations, and structuring active-recall questions. Please wait.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -867,6 +1128,29 @@ export default function AiCompanionView({
       {/* MODE 3: ACTIVE FLASHCARDS DECK VIEW */}
       {!loading && activeMode === "flashcards" && (
         <div className="max-w-md mx-auto space-y-6">
+          <div className="flex items-center justify-between border-b border-bento-secondary/10 pb-3 flex-wrap gap-2">
+            <h3 className="text-xs font-bold text-bento-secondary uppercase tracking-wider">Flashcard Deck</h3>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleExportFlashcardsJson}
+                className="text-[10px] bg-bento-secondary/10 border border-bento-secondary/25 hover:border-bento-primary/45 text-bento-text-muted hover:text-white px-2 py-0.5 rounded-md font-bold cursor-pointer transition flex items-center gap-1"
+                title="Export Flashcards Deck"
+              >
+                <span>Export JSON</span>
+              </button>
+              <button
+                onClick={() => {
+                  setImportJsonText("");
+                  setImportError(null);
+                  setShowCardImportModal(true);
+                }}
+                className="text-[10px] bg-bento-primary/10 border border-bento-primary/25 text-bento-primary px-2 py-0.5 rounded-md font-black cursor-pointer transition flex items-center gap-1"
+                title="Import Flashcards Deck"
+              >
+                <span>Import JSON</span>
+              </button>
+            </div>
+          </div>
           {courseCards.length === 0 ? (
             <div className="bg-bento-card border border-bento-secondary/15 rounded-3xl p-10 text-center text-bento-text-muted shadow-sm space-y-2">
               <Layers className="w-10 h-10 text-bento-secondary/35 mx-auto" />
@@ -878,9 +1162,40 @@ export default function AiCompanionView({
               {/* Progress and card tracker header */}
               <div className="flex items-center justify-between text-xs text-bento-secondary font-bold">
                 <span>CARD {activeCardIndex + 1} OF {courseCards.length}</span>
-                <span className="uppercase bg-bento-bg border border-bento-secondary/25 text-bento-primary px-3 py-1 rounded-xl text-[9px] tracking-wide font-extrabold">
-                  Strength: {courseCards[activeCardIndex].strength}
-                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => {
+                      const card = courseCards[activeCardIndex];
+                      setEditFlashcardId(card.id);
+                      setEditFlashcardFront(card.front);
+                      setEditFlashcardBack(card.back);
+                      setShowEditFlashcard(true);
+                    }}
+                    className="p-1 text-bento-secondary hover:text-bento-primary rounded hover:bg-bento-card/45 transition cursor-pointer"
+                    title="Edit card content"
+                  >
+                    <svg className="w-3.5 h-3.5 text-bento-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                  </button>
+                  {onRemoveFlashcard && (
+                    <button
+                      onClick={() => {
+                        if (confirm("Are you sure you want to delete this flashcard?")) {
+                          onRemoveFlashcard(courseCards[activeCardIndex].id);
+                          if (activeCardIndex > 0) {
+                            setActiveCardIndex((prev) => prev - 1);
+                          }
+                        }
+                      }}
+                      className="p-1 text-bento-secondary hover:text-rose-400 rounded hover:bg-rose-950/20 transition cursor-pointer"
+                      title="Delete card"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  )}
+                  <span className="uppercase bg-bento-bg border border-bento-secondary/25 text-bento-primary px-3 py-1 rounded-xl text-[9px] tracking-wide font-extrabold">
+                    Strength: {courseCards[activeCardIndex].strength}
+                  </span>
+                </div>
               </div>
 
               {/* CARD FLIPCONTAINER WITH CSS 3D TRANSFORMS */}
@@ -1057,7 +1372,7 @@ export default function AiCompanionView({
             className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-bento-primary text-bento-bg text-xs font-black rounded-xl hover:bg-bento-primary/95 transition shadow-lg border border-bento-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             <Sparkles className="w-4 h-4 text-bento-bg animate-pulse" />
-            <span>Generate First 10 Lessons</span>
+            <span>Generate All 30 Lessons (10 Chunks at Once)</span>
           </button>
         </div>
       )}
@@ -1085,14 +1400,36 @@ export default function AiCompanionView({
                 </p>
               </div>
               
-              {/* Reset curriculum button */}
-              <button
-                onClick={handleGenerateCurriculum}
-                className="shrink-0 flex items-center gap-1.5 px-4.5 py-2 bg-bento-bg hover:bg-bento-bg/75 border border-bento-secondary/20 text-[11px] font-bold text-bento-secondary hover:text-white rounded-xl transition cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Recompile Curriculum</span>
-              </button>
+              {/* Reset curriculum & Backup buttons */}
+              <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                <button
+                  onClick={handleExportCurriculumsJson}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-bento-secondary/10 border border-bento-secondary/20 hover:border-bento-primary/45 text-bento-text-muted hover:text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                  title="Export all curriculums as JSON backup"
+                >
+                  <svg className="w-3.5 h-3.5 text-bento-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  <span>Export JSON</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setImportJsonText("");
+                    setImportError(null);
+                    setShowCurriculumImportModal(true);
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-bento-primary/10 border border-bento-primary/25 text-bento-primary rounded-xl text-xs font-black transition cursor-pointer"
+                  title="Import curriculums from JSON backup"
+                >
+                  <svg className="w-3.5 h-3.5 text-bento-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                  <span>Import JSON</span>
+                </button>
+                <button
+                  onClick={handleGenerateCurriculum}
+                  className="shrink-0 flex items-center gap-1.5 px-4.5 py-2 bg-bento-bg hover:bg-bento-bg/75 border border-bento-secondary/20 text-[11px] font-bold text-bento-secondary hover:text-white rounded-xl transition cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Recompile Curriculum</span>
+                </button>
+              </div>
             </div>
 
             {/* Floating Toast Notification */}
@@ -1250,9 +1587,24 @@ export default function AiCompanionView({
                           Lesson Core: {currentCurriculum.lessons[activeLessonIndex].title}
                         </h3>
                       </div>
-                      <span className="text-[10px] text-bento-secondary uppercase font-bold tracking-widest">
-                        Lecture Notes
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => {
+                            const lesson = currentCurriculum.lessons[activeLessonIndex];
+                            setEditLessonTitle(lesson.title);
+                            setEditLessonDuration(lesson.duration || "25m");
+                            setEditLessonExplanation(lesson.explanation || "");
+                            setShowEditLesson(true);
+                          }}
+                          className="px-2 py-1 bg-bento-bg hover:bg-bento-card/65 border border-bento-secondary/20 hover:border-bento-primary/40 text-[10px] font-bold text-white rounded-lg transition cursor-pointer flex items-center gap-1.5"
+                        >
+                          <svg className="w-3 h-3 text-bento-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                          <span>Edit Lesson</span>
+                        </button>
+                        <span className="text-[10px] text-bento-secondary uppercase font-bold tracking-widest">
+                          Lecture Notes
+                        </span>
+                      </div>
                     </div>
 
                     <div className="prose prose-sm max-w-none text-xs text-bento-text-muted leading-relaxed font-sans space-y-2">
@@ -1444,6 +1796,245 @@ export default function AiCompanionView({
           <p className="text-xs text-bento-text-muted/85 mt-1.5 leading-relaxed font-medium">
             Choose a subject above and compile. Our advanced Gemini AI Study Engine (with automatic flash-lite failover mechanism) parses through notes to build fully integrated lesson curricula, visual conceptual diagrams, LaTeX worksheets, assessments, and active-recall flashcard decks completely custom tailored to your syllabus.
           </p>
+        </div>
+      )}
+
+      {/* MODAL EDIT FLASHCARD */}
+      {showEditFlashcard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-bento-card rounded-3xl border border-bento-secondary/25 shadow-[0_10px_30px_rgba(0,0,0,0.6)] w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-bento-secondary/10 pb-3">
+              <h3 className="text-base font-extrabold text-white">Edit Flashcard Key</h3>
+              <button
+                type="button"
+                onClick={() => setShowEditFlashcard(false)}
+                className="text-bento-text-muted hover:text-white text-xl cursor-pointer font-bold outline-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveFlashcardEdit} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Recall Trigger (Front)</label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="The concept prompt"
+                  value={editFlashcardFront}
+                  onChange={(e) => setEditFlashcardFront(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-sm resize-none font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Recall Answer / Explanation (Back)</label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="The detailed definitions explanation"
+                  value={editFlashcardBack}
+                  onChange={(e) => setEditFlashcardBack(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-xs resize-none leading-relaxed"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-bento-secondary/10">
+                <button
+                  type="button"
+                  onClick={() => setShowEditFlashcard(false)}
+                  className="px-4 py-2 border border-bento-secondary/20 text-bento-text-muted rounded-xl text-xs font-bold hover:bg-bento-bg cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-bento-primary hover:bg-bento-primary/95 text-bento-bg rounded-xl text-xs font-bold shadow-sm cursor-pointer transition"
+                >
+                  Save Card
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDIT LESSON CONTENT */}
+      {showEditLesson && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-bento-card rounded-3xl border border-bento-secondary/25 shadow-[0_10px_30px_rgba(0,0,0,0.6)] w-full max-w-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-bento-secondary/10 pb-3">
+              <h3 className="text-base font-extrabold text-white">Modify Lesson Details</h3>
+              <button
+                type="button"
+                onClick={() => setShowEditLesson(false)}
+                className="text-bento-text-muted hover:text-white text-xl cursor-pointer font-bold outline-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveLessonEditDirect} className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Lecture Unit Title</label>
+                  <input
+                    type="text"
+                    required
+                    value={editLessonTitle}
+                    onChange={(e) => setEditLessonTitle(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Duration</label>
+                  <input
+                    type="text"
+                    required
+                    value={editLessonDuration}
+                    onChange={(e) => setEditLessonDuration(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-sm text-center font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Detailed Explanation Notes (Markdown / LaTeX)</label>
+                <textarea
+                  rows={12}
+                  required
+                  placeholder="Write comprehensive syllabus information notes using Markdown or LaTeX formulas."
+                  value={editLessonExplanation}
+                  onChange={(e) => setEditLessonExplanation(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-xs font-mono leading-relaxed resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-bento-secondary/10">
+                <button
+                  type="button"
+                  onClick={() => setShowEditLesson(false)}
+                  className="px-4 py-2 border border-bento-secondary/20 text-bento-text-muted rounded-xl text-xs font-bold hover:bg-bento-bg cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-bento-primary hover:bg-bento-primary/95 text-bento-bg rounded-xl text-xs font-bold shadow-sm cursor-pointer transition"
+                >
+                  Save Unit Content
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL IMPORT FLASHCARDS JSON */}
+      {showCardImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-bento-card rounded-3xl border border-bento-secondary/25 shadow-[0_10px_30px_rgba(0,0,0,0.6)] w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-bento-secondary/10 pb-3">
+              <h3 className="text-base font-extrabold text-white">Import Recall Flashcards</h3>
+              <button
+                type="button"
+                onClick={() => setShowCardImportModal(false)}
+                className="text-bento-text-muted hover:text-white text-xl cursor-pointer font-bold outline-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-xs text-bento-text-muted leading-relaxed">
+                Paste flashcards array data to merge backup sheets into your active decks inventory.
+              </p>
+
+              {importError && (
+                <div className="p-3 bg-rose-950/20 border border-rose-500/25 rounded-xl text-[11px] text-rose-300 font-bold">
+                  ⚠️ {importError}
+                </div>
+              )}
+
+              <textarea
+                rows={6}
+                value={importJsonText}
+                onChange={(e) => setImportJsonText(e.target.value)}
+                placeholder='e.g.&#10;[&#10;  {&#10;    "front": "What is the Big O time complexity of binary search?",&#10;    "back": "O(log n), since the search space is halved in each step."&#10;  }&#10;]'
+                className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-xs font-mono leading-relaxed"
+              />
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-bento-secondary/10">
+                <button
+                  type="button"
+                  onClick={() => setShowCardImportModal(false)}
+                  className="px-4 py-2 border border-bento-secondary/20 text-bento-text-muted rounded-xl text-xs font-bold hover:bg-bento-bg cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImportFlashcards}
+                  className="px-4 py-2 bg-bento-primary hover:bg-bento-primary/95 text-bento-bg rounded-xl text-xs font-bold shadow-sm cursor-pointer transition"
+                >
+                  Merge Cards
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL IMPORT CURRICULUMS JSON */}
+      {showCurriculumImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-bento-card rounded-3xl border border-bento-secondary/25 shadow-[0_10px_30px_rgba(0,0,0,0.6)] w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-bento-secondary/10 pb-3">
+              <h3 className="text-base font-extrabold text-white">Import Curriculums Backup</h3>
+              <button
+                type="button"
+                onClick={() => setShowCurriculumImportModal(false)}
+                className="text-bento-text-muted hover:text-white text-xl cursor-pointer font-bold outline-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-xs text-bento-text-muted leading-relaxed">
+                Paste all curriculum key-value map backups to restore comprehensive lesson tracks.
+              </p>
+
+              {importError && (
+                <div className="p-3 bg-rose-950/20 border border-rose-500/25 rounded-xl text-[11px] text-rose-300 font-bold">
+                  ⚠️ {importError}
+                </div>
+              )}
+
+              <textarea
+                rows={6}
+                value={importJsonText}
+                onChange={(e) => setImportJsonText(e.target.value)}
+                placeholder='e.g.&#10;{&#10;  "course-123": {&#10;    "curriculumTitle": "Intro to Quantum Computing",&#10;    "lessons": []&#10;  }&#10;}'
+                className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-xs font-mono leading-relaxed"
+              />
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-bento-secondary/10">
+                <button
+                  type="button"
+                  onClick={() => setShowCurriculumImportModal(false)}
+                  className="px-4 py-2 border border-bento-secondary/20 text-bento-text-muted rounded-xl text-xs font-bold hover:bg-bento-bg cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImportCurriculums}
+                  className="px-4 py-2 bg-bento-primary hover:bg-bento-primary/95 text-bento-bg rounded-xl text-xs font-bold shadow-sm cursor-pointer transition"
+                >
+                  Restore Tracks
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

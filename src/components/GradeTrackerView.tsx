@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Plus, Trash2, Edit2, Calendar, Award, Percent, BookOpen, AlertCircle, CheckCircle } from "lucide-react";
+import { Plus, Trash2, Edit2, Calendar, Award, Percent, BookOpen, AlertCircle, CheckCircle, Database, Upload, Download } from "lucide-react";
 import { Course, Assignment } from "../types";
 
 interface GradeTrackerViewProps {
@@ -43,6 +43,20 @@ export default function GradeTrackerView({
   const [newAssMax, setNewAssMax] = useState(100);
   const [newAssWeight, setNewAssWeight] = useState(10);
   const [newAssDueDate, setNewAssDueDate] = useState("");
+
+  // Edit Course states
+  const [showEditCourse, setShowEditCourse] = useState(false);
+  const [editCourseId, setEditCourseId] = useState("");
+  const [editCourseName, setEditCourseName] = useState("");
+  const [editCourseCode, setEditCourseCode] = useState("");
+  const [editCourseInstructor, setEditCourseInstructor] = useState("");
+  const [editCourseCredits, setEditCourseCredits] = useState(3);
+  const [editCourseTarget, setEditCourseTarget] = useState("A");
+
+  // JSON Import state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importJsonText, setImportJsonText] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
 
   const activeCourse = courses.find((c) => c.id === selectedCourseId) || courses[0];
 
@@ -99,6 +113,61 @@ export default function GradeTrackerView({
     setNewCourseCode("");
     setNewCourseInstructor("");
     setShowAddCourse(false);
+  };
+
+  const handleSaveCourseEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editCourseName || !editCourseCode) return;
+    const original = courses.find((c) => c.id === editCourseId);
+    if (!original) return;
+
+    const updatedC: Course = {
+      ...original,
+      name: editCourseName,
+      code: editCourseCode.toUpperCase(),
+      instructor: editCourseInstructor,
+      creditHours: Number(editCourseCredits) || 3,
+      targetGrade: editCourseTarget
+    };
+
+    onUpdateCourse(updatedC);
+    setShowEditCourse(false);
+  };
+
+  const handleExportClassesJson = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(courses, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", "novascholar_classes.json");
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleImportClasses = () => {
+    try {
+      const parsed = JSON.parse(importJsonText);
+      const list = Array.isArray(parsed) ? parsed : [parsed];
+      
+      for (const item of list) {
+        if (!item.name || !item.code) {
+          throw new Error("Invalid course structure. Each course must have at least a 'name' and 'code' field.");
+        }
+        if (!item.id) {
+          item.id = `c-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        }
+        if (!item.assignments) {
+          item.assignments = [];
+        }
+      }
+
+      list.forEach(c => onAddCourse(c));
+      setImportJsonText("");
+      setShowImportModal(false);
+      setImportError(null);
+    } catch (e: any) {
+      setImportError(e.message || "Invalid JSON syntax.");
+    }
   };
 
   const handleCreateAssignment = (e: React.FormEvent) => {
@@ -223,7 +292,31 @@ export default function GradeTrackerView({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Side: Course Inventory Selector */}
         <div className="lg:col-span-4 space-y-4">
-          <h3 className="text-xs font-bold text-bento-secondary uppercase tracking-wider">Course Catalogue</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-bento-secondary uppercase tracking-wider">Course Catalogue</h3>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleExportClassesJson}
+                className="text-[10px] bg-bento-secondary/10 border border-bento-secondary/25 hover:border-bento-primary/45 text-bento-text-muted hover:text-white px-2 py-0.5 rounded-md font-bold cursor-pointer transition flex items-center gap-1"
+                title="Export Classes JSON"
+              >
+                <Download className="w-2.5 h-2.5" />
+                <span>Export</span>
+              </button>
+              <button
+                onClick={() => {
+                  setImportJsonText("");
+                  setImportError(null);
+                  setShowImportModal(true);
+                }}
+                className="text-[10px] bg-bento-primary/10 border border-bento-primary/25 text-bento-primary px-2 py-0.5 rounded-md font-black cursor-pointer transition flex items-center gap-1"
+                title="Import Classes JSON"
+              >
+                <Upload className="w-2.5 h-2.5" />
+                <span>Import</span>
+              </button>
+            </div>
+          </div>
           <div className="space-y-2.5">
             {courses.length === 0 ? (
               <div className="text-center p-8 bg-bento-bg/40 rounded-2xl border border-dashed border-bento-secondary/20 text-bento-text-muted">
@@ -309,17 +402,33 @@ export default function GradeTrackerView({
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={() => setShowAddAssignment(true)}
-                    className="flex items-center gap-1.5 px-3.5 py-2 bg-bento-primary hover:bg-bento-primary/90 text-bento-bg rounded-xl text-xs font-bold shadow-sm transition cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-bento-primary hover:bg-bento-primary/90 text-bento-bg rounded-xl text-xs font-bold shadow-sm transition cursor-pointer"
                   >
-                    <Plus className="w-4 h-4 stroke-[2.5]" />
-                    <span>Add Assignment</span>
+                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span>Add Score</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditCourseId(activeCourse.id);
+                      setEditCourseName(activeCourse.name);
+                      setEditCourseCode(activeCourse.code);
+                      setEditCourseInstructor(activeCourse.instructor || "");
+                      setEditCourseCredits(activeCourse.creditHours || 3);
+                      setEditCourseTarget(activeCourse.targetGrade || "A");
+                      setShowEditCourse(true);
+                    }}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-bento-bg hover:bg-bento-bg/80 border border-bento-secondary/20 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                    title="Edit Course Parameters"
+                  >
+                    <Edit2 className="w-3 h-3 text-bento-primary" />
+                    <span>Edit Class</span>
                   </button>
                   <button
                     onClick={() => handleRemoveCourseDirect(activeCourse.id)}
-                    className="flex items-center gap-1 px-3.5 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-bold transition cursor-pointer"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-bold transition cursor-pointer"
                     title="Delete course"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -600,6 +709,157 @@ export default function GradeTrackerView({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Edit Course */}
+      {showEditCourse && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-bento-card rounded-3xl border border-bento-secondary/25 shadow-[0_10px_30px_rgba(0,0,0,0.6)] w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-bento-secondary/10 pb-3">
+              <h3 className="text-base font-extrabold text-white">Modify Class parameters</h3>
+              <button
+                type="button"
+                onClick={() => setShowEditCourse(false)}
+                className="text-bento-text-muted hover:text-white text-xl cursor-pointer font-bold outline-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCourseEdit} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Class/Course Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Advanced Organic Chemistry"
+                  value={editCourseName}
+                  onChange={(e) => setEditCourseName(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Course Code</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. CHEM-302"
+                    value={editCourseCode}
+                    onChange={(e) => setEditCourseCode(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Credit Hours</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="6"
+                    value={editCourseCredits}
+                    onChange={(e) => setEditCourseCredits(Number(e.target.value))}
+                    className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Instructor Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Dr. Vance"
+                  value={editCourseInstructor}
+                  onChange={(e) => setEditCourseInstructor(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block mb-1.5">Target Grade Letter</label>
+                <select
+                  value={editCourseTarget}
+                  onChange={(e) => setEditCourseTarget(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none text-sm cursor-pointer"
+                >
+                  {LETTER_GRADES.map((lg) => (
+                    <option key={lg} value={lg} className="bg-bento-bg text-white">{lg}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-bento-secondary/10">
+                <button
+                  type="button"
+                  onClick={() => setShowEditCourse(false)}
+                  className="px-4 py-2 border border-bento-secondary/20 text-bento-text-muted rounded-xl text-xs font-bold hover:bg-bento-bg cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-bento-primary hover:bg-bento-primary/95 text-bento-bg rounded-xl text-xs font-bold shadow-sm cursor-pointer transition"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Import Classes */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-bento-card rounded-3xl border border-bento-secondary/25 shadow-[0_10px_30px_rgba(0,0,0,0.6)] w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-bento-secondary/10 pb-3">
+              <h3 className="text-base font-extrabold text-white">Import Class JSON</h3>
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                className="text-bento-text-muted hover:text-white text-xl cursor-pointer font-bold outline-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-xs text-bento-text-muted leading-relaxed">
+                Paste a course JSON structure (object or array) to merge it into your active semester courses catalog.
+              </p>
+
+              {importError && (
+                <div className="p-3 bg-rose-950/20 border border-rose-500/25 rounded-xl text-[11px] text-rose-300 font-bold">
+                  ⚠️ {importError}
+                </div>
+              )}
+
+              <textarea
+                rows={6}
+                value={importJsonText}
+                onChange={(e) => setImportJsonText(e.target.value)}
+                placeholder='e.g.&#10;{&#10;  "name": "Advanced Biochemistry",&#10;  "code": "BIOC-401",&#10;  "instructor": "Dr. Miller",&#10;  "creditHours": 4,&#10;  "targetGrade": "A"&#10;}'
+                className="w-full px-3 py-2.5 rounded-xl border border-bento-secondary/20 bg-bento-bg text-white focus:border-bento-primary/60 focus:outline-none placeholder-bento-text-muted/30 text-xs font-mono leading-relaxed"
+              />
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-bento-secondary/10">
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(false)}
+                  className="px-4 py-2 border border-bento-secondary/20 text-bento-text-muted rounded-xl text-xs font-bold hover:bg-bento-bg cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImportClasses}
+                  className="px-4 py-2 bg-bento-primary hover:bg-bento-primary/95 text-bento-bg rounded-xl text-xs font-bold shadow-sm cursor-pointer transition"
+                >
+                  Merge Classes
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

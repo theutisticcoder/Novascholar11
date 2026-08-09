@@ -453,7 +453,151 @@ app.post("/api/gemini/curriculum", async (req, res) => {
   }
 });
 
-// 8. AI Lesson Content Builder (Lazy Loader)
+// 7.1 AI Curriculum Chunk Builder (generates 10 fully complete lessons at a time)
+app.post("/api/gemini/curriculum-chunk", async (req, res) => {
+  try {
+    const { subject, notesContent, pdfBase64, startIndex, existingLessons } = req.body;
+    if (!subject) {
+      return res.status(400).json({ error: "Missing subject in request body." });
+    }
+
+    const hasExisting = Array.isArray(existingLessons) && existingLessons.length > 0;
+    const startNum = Number(startIndex) || (hasExisting ? existingLessons.length + 1 : 1);
+
+    let promptText = `You are an academic curriculum designer. We are incrementally building a highly detailed, completed 30-lesson curriculum for the subject: "${subject}".\n` +
+      `We generate this curriculum in sequence in 3 distinct chunks of exactly 10 fully finished lessons each.\n`;
+
+    if (hasExisting) {
+      promptText += `We have already generated the first ${existingLessons.length} lessons. Here are their titles for context:\n` +
+        existingLessons.map((l: any, i: number) => ` - Lesson ${i + 1}: ${l.title}`).join("\n") + "\n\n" +
+        `Now, please generate the NEXT chunk of exactly 10 sequential, distinct, fully completed lessons/topics (Lessons ${startNum} to ${startNum + 9}).\n` +
+        `Ensure these continuation topics flow logically, do not repeat existing ones, and are numbered starting from Unit ${startNum}.\n`;
+    } else {
+      promptText += `Please generate the FIRST chunk of exactly 10 fully completed, sequential lessons/topics (Lessons 1 to 10).\n` +
+        `Make sure this first batch builds the fundamental background for the subject.\n`;
+    }
+
+    promptText += `\nCRITICAL FORMATTING INSTRUCTIONS:\n` +
+      `1. For each of the 10 lessons in this chunk, you must generate the complete lesson content immediately (explanation, conceptGraph, quiz, and flashcards).\n` +
+      `2. Do NOT use Markdown (Md) anywhere in the lesson explanations or text fields. Do not use asterisks (**), hashtags (#), or markdown code blocks.\n` +
+      `3. Write all lesson explanations as beautifully styled HTML text strings using standard HTML tags: <p>, <strong>, <em>, <ul>, <li>, <h3>, <h4>, <code>, <pre>, <br>. This allows the content to render perfectly as HTML on the frontend.\n` +
+      `4. If there are mathematical formulas, use standard LaTeX notation ($...$ for inline and $$...$$ for display equations) within the HTML or text fields.\n` +
+      `5. Each lesson must include a unique conceptGraph with 3-5 nodes and 2-4 links illustrating the relationships of terms in this specific lesson.\n` +
+      `6. Each lesson must include exactly 3 multiple choice quiz questions (the answer field must be the 0-indexed integer index of the correct option in the options array).\n` +
+      `7. Each lesson must include exactly 3 active-recall flashcards with a front (question) and back (answer).\n\n` +
+      `Keep explanation HTML sections concise (around 150-250 words per lesson) to remain within token limits, but highly informative and ready to learn.`;
+
+    if (pdfBase64) {
+      promptText += `\n\nUse the attached PDF document as the primary curriculum source. Extract and align the topics directly with the material, chapters, or units present in this PDF context.`;
+    } else if (notesContent) {
+      promptText += `\n\nUse the following course notes as context:\n--- NOTES CONTEXT ---\n${notesContent}\n--- NOTES CONTEXT ---`;
+    }
+
+    const contents: any[] = [];
+    if (pdfBase64) {
+      contents.push({
+        inlineData: {
+          mimeType: "application/pdf",
+          data: pdfBase64
+        }
+      });
+    }
+    contents.push(promptText);
+
+    const response = await callGeminiWithFallback({
+      contents: contents,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          curriculumTitle: { type: Type.STRING },
+          curriculumOverview: { type: Type.STRING },
+          lessons: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                title: { type: Type.STRING },
+                duration: { type: Type.STRING },
+                explanation: { type: Type.STRING, description: "Detailed academic explanation formatted entirely in clean, semantic HTML (e.g., using <p>, <strong>, <em>, <ul>, <li>, <h3>, <h4>). Do NOT use any Markdown formatting." },
+                conceptGraph: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    nodes: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          id: { type: Type.STRING },
+                          label: { type: Type.STRING },
+                          description: { type: Type.STRING },
+                          val: { type: Type.INTEGER }
+                        },
+                        required: ["id", "label", "description", "val"]
+                      }
+                    },
+                    links: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          source: { type: Type.STRING },
+                          target: { type: Type.STRING },
+                          relationship: { type: Type.STRING }
+                        },
+                        required: ["source", "target", "relationship"]
+                      }
+                    }
+                  },
+                  required: ["title", "nodes", "links"]
+                },
+                quiz: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      question: { type: Type.STRING },
+                      options: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING }
+                      },
+                      answer: { type: Type.INTEGER },
+                      explanation: { type: Type.STRING }
+                    },
+                    required: ["question", "options", "answer", "explanation"]
+                  }
+                },
+                flashcards: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      front: { type: Type.STRING },
+                      back: { type: Type.STRING }
+                    },
+                    required: ["front", "back"]
+                  }
+                }
+              },
+              required: ["id", "title", "duration", "explanation", "conceptGraph", "quiz", "flashcards"]
+            }
+          }
+        },
+        required: ["curriculumTitle", "curriculumOverview", "lessons"]
+      }
+    });
+
+    const parsedData = JSON.parse(response.text || "{}");
+    res.json(parsedData);
+  } catch (error: any) {
+    console.error("Curriculum Chunk API Error:", error);
+    res.status(500).json({ error: error.message || "An error occurred generating curriculum chunk." });
+  }
+});
+
+// 8. AI Lesson Content Builder (Lazy Loader fallback, uses HTML instead of Markdown)
 app.post("/api/gemini/lesson-content", async (req, res) => {
   try {
     const { subject, topicTitle, notesContent } = req.body;
@@ -465,7 +609,7 @@ app.post("/api/gemini/lesson-content", async (req, res) => {
       `Reference notes context:\n` +
       `--- NOTES ---\n${notesContent || "Use standard academic knowledge."}\n--- NOTES ---\n\n` +
       `Provide:\n` +
-      `1. A comprehensive, beautifully formatted Explanation lecture in Markdown. Include formulas in standard LaTeX ($...$ and $$...$$).\n` +
+      `1. A comprehensive, beautifully formatted Explanation lecture in clean HTML. Do NOT use Markdown (No asterisks, no hashtags). Use tags: <p>, <strong>, <em>, <ul>, <li>, <h3>, <h4>, <code>. Include formulas in standard LaTeX ($...$ and $$...$$).\n` +
       `2. A conceptGraph detailing the relationships between key concepts of THIS topic. Include 3-5 concept nodes and 2-4 linkage paths.\n` +
       `3. A Quiz of exactly 3 relevant multiple-choice questions with explanations.\n` +
       `4. Exactly 3 active-recall Flashcards (front and back).\n\n` +
@@ -477,7 +621,7 @@ app.post("/api/gemini/lesson-content", async (req, res) => {
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          explanation: { type: Type.STRING },
+          explanation: { type: Type.STRING, description: "Detailed explanation formatted in semantic HTML. No Markdown." },
           conceptGraph: {
             type: Type.OBJECT,
             properties: {

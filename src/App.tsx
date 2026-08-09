@@ -304,6 +304,7 @@ export default function App() {
                 courses={courses}
                 onAddEvent={(newEv) => setEvents((prev) => [...prev, newEv])}
                 onRemoveEvent={(evId) => setEvents((prev) => prev.filter((e) => e.id !== evId))}
+                onUpdateEvent={(updatedEv) => setEvents((prev) => prev.map((e) => e.id === updatedEv.id ? updatedEv : e))}
               />
             )}
 
@@ -321,6 +322,12 @@ export default function App() {
                   setSelectedNoteId(newNote.id);
                   setActiveTab("notes");
                 }}
+                onUpdateFlashcard={(updatedCard) =>
+                  setFlashcards((prev) => prev.map((fc) => (fc.id === updatedCard.id ? updatedCard : fc)))
+                }
+                onRemoveFlashcard={(fcId) =>
+                  setFlashcards((prev) => prev.filter((fc) => fc.id !== fcId))
+                }
               />
             )}
 

@@ -26,6 +26,17 @@ export default function LatexRenderer({ text, className = "", inline = false }: 
   }, [text]);
 
   const Tag = inline ? "span" : "div";
+  const isHtml = /<[a-z][\s\S]*>/i.test(text);
+
+  if (isHtml) {
+    return (
+      <Tag
+        ref={containerRef as any}
+        className={`tex2jax_process leading-relaxed ${className}`}
+        dangerouslySetInnerHTML={{ __html: text }}
+      />
+    );
+  }
 
   return (
     <Tag
