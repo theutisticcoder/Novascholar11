@@ -316,6 +316,11 @@ export default function App() {
                 onUpdateFlashcardStrength={(fcId, str) =>
                   setFlashcards((prev) => prev.map((fc) => (fc.id === fcId ? { ...fc, strength: str } : fc)))
                 }
+                onAddNote={(newNote) => {
+                  setNotes((prev) => [newNote, ...prev]);
+                  setSelectedNoteId(newNote.id);
+                  setActiveTab("notes");
+                }}
               />
             )}
 

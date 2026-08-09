@@ -125,3 +125,49 @@ export interface StudyGuide {
   keyTerms: { term: string; definition: string }[];
   dateGenerated: string;
 }
+
+export interface ConceptNode {
+  id: string;
+  label: string;
+  description: string;
+  val: number;
+}
+
+export interface ConceptLink {
+  source: string;
+  target: string;
+  relationship: string;
+}
+
+export interface ConceptGraph {
+  title: string;
+  nodes: ConceptNode[];
+  links: ConceptLink[];
+}
+
+export interface CurriculumLesson {
+  id: string;
+  title: string;
+  duration: string;
+  explanation: string;
+  conceptGraph: ConceptGraph;
+  quiz: {
+    question: string;
+    options: string[];
+    answer: number;
+    explanation: string;
+  }[];
+  flashcards: {
+    front: string;
+    back: string;
+  }[];
+}
+
+export interface Curriculum {
+  id: string;
+  curriculumTitle: string;
+  curriculumOverview: string;
+  courseId: string;
+  lessons: CurriculumLesson[];
+}
+

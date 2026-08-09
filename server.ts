@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { Mistral } from "@mistralai/mistralai";
+import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -28,6 +29,62 @@ function getMistralClient(): Mistral {
   return mistralClient;
 }
 
+// Lazy initializer for Google Gen AI client
+let aiClient: GoogleGenAI | null = null;
+
+function getAiClient(): GoogleGenAI {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY || "AI_STUDIO_DEFAULT_KEY";
+    aiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
+  }
+  return aiClient;
+}
+
+// Falling back from 3.5 flash-lite to 3.1 flash-lite and older/other flash lites when limits are hit
+const FALLBACK_MODELS = [
+  "gemini-3.5-flash-lite", // 3.5 flash-lite
+  "gemini-3.1-flash-lite", // 3.1 flash-lite
+  "gemini-2.5-flash",      // 2.5 flash
+  "gemini-1.5-flash"       // 1.5 flash
+];
+
+async function callGeminiWithFallback(config: {
+  contents: any;
+  responseMimeType?: string;
+  responseSchema?: any;
+}) {
+  const ai = getAiClient();
+  let lastError: any = null;
+
+  for (const modelName of FALLBACK_MODELS) {
+    try {
+      console.log(`Attempting Gemini generation using model: ${modelName}`);
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: config.contents,
+        config: {
+          responseMimeType: config.responseMimeType,
+          responseSchema: config.responseSchema,
+        }
+      });
+      console.log(`Successfully completed Gemini generation with model: ${modelName}`);
+      return response;
+    } catch (err: any) {
+      console.warn(`Model ${modelName} failed or limit reached. Error: ${err?.message || err}`);
+      lastError = err;
+    }
+  }
+
+  throw new Error(`All Gemini Flash-Lite fallback models failed. Last error: ${lastError?.message || lastError}`);
+}
+
 function extractTextContent(content: any): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
@@ -49,48 +106,24 @@ app.post("/api/gemini/ocr", async (req, res) => {
       return res.status(400).json({ error: "Missing imageBase64 in request body." });
     }
 
-    const mistral = getMistralClient();
+    const imagePart = {
+      inlineData: {
+        mimeType: mimeType || "image/png",
+        data: imageBase64,
+      },
+    };
+
     const promptText = "Analyze this image which contains academic notes, handwriting, sketches, or math equations.\n" +
       "1. Extract all legible handwritten or typed text.\n" +
       "2. Detect any mathematical formulas, converting them carefully to standard LaTeX notation. Use $$...$$ for block/display math and $...$ for inline math.\n" +
       "3. Describe any drawings, charts, or visual sketches present in detail so they can be represented as structured textual/visual concepts.\n" +
       "4. Organize everything into a neat, structured, academic study note outline with headers, subheaders, and bullet points.";
 
-    let response;
-    try {
-      response = await mistral.chat.complete({
-        model: MISTRAL_MODEL,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image_url",
-                imageUrl: `data:${mimeType || "image/png"};base64,${imageBase64}`,
-              },
-              {
-                type: "text",
-                text: promptText,
-              },
-            ] as any,
-          },
-        ],
-      });
-    } catch (visionErr) {
-      // Fallback if vision array isn't accepted by model
-      response = await mistral.chat.complete({
-        model: MISTRAL_MODEL,
-        messages: [
-          {
-            role: "user",
-            content: promptText + "\n[Image attached in request payload]",
-          },
-        ],
-      });
-    }
+    const response = await callGeminiWithFallback({
+      contents: [imagePart, promptText]
+    });
 
-    const resultText = extractTextContent(response?.choices?.[0]?.message?.content);
-    res.json({ result: resultText });
+    res.json({ result: response.text });
   } catch (error: any) {
     console.error("OCR API Error:", error);
     res.status(500).json({ error: error.message || "An error occurred during OCR analysis." });
@@ -100,26 +133,27 @@ app.post("/api/gemini/ocr", async (req, res) => {
 // 2. Audio Transcript and Speech Notes Parser
 app.post("/api/gemini/transcribe", async (req, res) => {
   try {
-    const { audioBase64 } = req.body;
+    const { audioBase64, mimeType } = req.body;
     if (!audioBase64) {
       return res.status(400).json({ error: "Missing audioBase64 in request body." });
     }
 
-    const mistral = getMistralClient();
-    const response = await mistral.chat.complete({
-      model: MISTRAL_MODEL,
-      messages: [
-        {
-          role: "user",
-          content: "Listen to and process this audio recording notes context.\n" +
-            "1. Provide a highly accurate academic transcript filtering out stuttering and filler words.\n" +
-            "2. Generate a structured study summary section with key definitions and actionable takeaways.",
-        },
-      ],
+    const audioPart = {
+      inlineData: {
+        mimeType: mimeType || "audio/webm",
+        data: audioBase64,
+      },
+    };
+
+    const promptText = "Listen to and process this audio recording notes context.\n" +
+      "1. Provide a highly accurate academic transcript filtering out stuttering and filler words.\n" +
+      "2. Generate a structured study summary section with key definitions and actionable takeaways.";
+
+    const response = await callGeminiWithFallback({
+      contents: [audioPart, promptText]
     });
 
-    const resultText = extractTextContent(response?.choices?.[0]?.message?.content);
-    res.json({ result: resultText });
+    res.json({ result: response.text });
   } catch (error: any) {
     console.error("Transcription API Error:", error);
     res.status(500).json({ error: error.message || "An error occurred during audio transcription." });
@@ -134,30 +168,41 @@ app.post("/api/gemini/study-guide", async (req, res) => {
       return res.status(400).json({ error: "Missing subject in request body." });
     }
 
-    const mistral = getMistralClient();
     const prompt = `Create a comprehensive, academic-grade Study Guide for the subject: "${subject}".\n` +
       `Here is the context and reference notes/material provided:\n` +
       `--- START NOTES ---\n${notesContent || "No detailed notes provided. Generate a high-level guide on typical curriculum for this subject."}\n--- END NOTES ---\n\n` +
       `Translate equations or math to standard LaTeX ($...$ and $$...$$).\n` +
-      `Respond ONLY with a valid JSON object with keys: "title", "content" (Markdown), "summaryPoints" (array of strings), and "keyTerms" (array of { "term": string, "definition": string }). Do not wrap in backticks or markdown fences.`;
+      `Respond ONLY with a valid JSON object matching the defined study guide schema.`;
 
-    const response = await mistral.chat.complete({
-      model: MISTRAL_MODEL,
-      responseFormat: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert academic AI tutor. Output strictly valid JSON.",
+    const response = await callGeminiWithFallback({
+      contents: prompt,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          content: { type: Type.STRING },
+          summaryPoints: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING }
+          },
+          keyTerms: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                term: { type: Type.STRING },
+                definition: { type: Type.STRING }
+              },
+              required: ["term", "definition"]
+            }
+          }
         },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
+        required: ["title", "content", "summaryPoints", "keyTerms"]
+      }
     });
 
-    const rawText = extractTextContent(response?.choices?.[0]?.message?.content);
-    const parsedData = JSON.parse(rawText || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("Study Guide API Error:", error);
@@ -173,32 +218,42 @@ app.post("/api/gemini/quiz", async (req, res) => {
       return res.status(400).json({ error: "Missing subject in request body." });
     }
 
-    const mistral = getMistralClient();
     const qCount = Math.min(Math.max(Number(count) || 5, 2), 15);
     const prompt = `Generate an interactive academic multiple-choice quiz on the topic: "${subject}".\n` +
       `The quiz should contain exactly ${qCount} questions of varying difficulty (easy, medium, hard).\n` +
       `Reference notes context:\n` +
       `--- NOTES START ---\n${notesContent || "No context notes provided. Generate based on standard course curriculum."}\n--- NOTES END ---\n\n` +
-      `Provide four (4) distinct, realistic options for each question. One option must be strictly correct. Provide a thorough, educational explanation of why the correct option is right. Make sure mathematical symbols or equations are in standard LaTeX ($...$).\n` +
-      `Respond ONLY with a JSON object: { "title": string, "questions": [{ "question": string, "options": [4 strings], "answer": 0-3 int, "explanation": string }] }`;
+      `Provide four (4) distinct, realistic options for each question. One option must be strictly correct. Provide a thorough, educational explanation of why the correct option is right. Make sure mathematical symbols or equations are in standard LaTeX ($...$).`;
 
-    const response = await mistral.chat.complete({
-      model: MISTRAL_MODEL,
-      responseFormat: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert quiz generator. Output strictly valid JSON.",
+    const response = await callGeminiWithFallback({
+      contents: prompt,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          questions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                question: { type: Type.STRING },
+                options: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                },
+                answer: { type: Type.INTEGER },
+                explanation: { type: Type.STRING }
+              },
+              required: ["question", "options", "answer", "explanation"]
+            }
+          }
         },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
+        required: ["title", "questions"]
+      }
     });
 
-    const rawText = extractTextContent(response?.choices?.[0]?.message?.content);
-    const parsedData = JSON.parse(rawText || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("Quiz API Error:", error);
@@ -214,33 +269,36 @@ app.post("/api/gemini/flashcards", async (req, res) => {
       return res.status(400).json({ error: "Missing subject in request body." });
     }
 
-    const mistral = getMistralClient();
     const cardCount = Math.min(Math.max(Number(count) || 8, 4), 20);
     const prompt = `Generate exactly ${cardCount} active-recall study flashcards on "${subject}".\n` +
       `Context notes:\n` +
       `--- NOTES ---\n${notesContent || "No specific notes provided. Generate typical academic cards on typical student syllabus."}\n--- NOTES ---\n\n` +
-      `Each card must have a trigger question on 'front' and a conceptual answer on 'back'. Ensure formulas are LaTeX ($...$).\n` +
-      `Respond ONLY with JSON object containing "flashcards": [{ "front": string, "back": string }]`;
+      `Each card must have a trigger question on 'front' and a conceptual answer on 'back'. Ensure formulas are LaTeX ($...$).`;
 
-    const response = await mistral.chat.complete({
-      model: MISTRAL_MODEL,
-      responseFormat: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: "You are an active-recall study flashcard generator. Output strictly valid JSON.",
+    const response = await callGeminiWithFallback({
+      contents: prompt,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          flashcards: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                front: { type: Type.STRING },
+                back: { type: Type.STRING }
+              },
+              required: ["front", "back"]
+            }
+          }
         },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
+        required: ["flashcards"]
+      }
     });
 
-    const rawText = extractTextContent(response?.choices?.[0]?.message?.content);
-    const parsedData = JSON.parse(rawText || "{}");
-    const cards = Array.isArray(parsedData) ? parsedData : (parsedData.flashcards || []);
-    res.json({ flashcards: cards });
+    const parsedData = JSON.parse(response.text || "{}");
+    res.json({ flashcards: parsedData.flashcards || [] });
   } catch (error: any) {
     console.error("Flashcards API Error:", error);
     res.status(500).json({ error: error.message || "An error occurred generating flashcards." });
@@ -255,32 +313,141 @@ app.post("/api/gemini/latex-helper", async (req, res) => {
       return res.status(400).json({ error: "Missing prompt in request body." });
     }
 
-    const mistral = getMistralClient();
     const aiPrompt = `Convert the following mathematical concept, equation description, or natural language request into standard, clean LaTeX code.\n` +
       `User Request: "${prompt}"\n\n` +
-      `Provide ONLY valid LaTeX code without enclosing dollars ($ or $$). Respond with JSON object: { "latex": string, "description": string }`;
+      `Provide ONLY valid LaTeX code without enclosing dollars ($ or $$).`;
 
-    const response = await mistral.chat.complete({
-      model: MISTRAL_MODEL,
-      responseFormat: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: "You are a LaTeX math formatting assistant. Output strictly valid JSON.",
+    const response = await callGeminiWithFallback({
+      contents: aiPrompt,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          latex: { type: Type.STRING },
+          description: { type: Type.STRING }
         },
-        {
-          role: "user",
-          content: aiPrompt,
-        },
-      ],
+        required: ["latex", "description"]
+      }
     });
 
-    const rawText = extractTextContent(response?.choices?.[0]?.message?.content);
-    const parsedData = JSON.parse(rawText || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("LaTeX Helper API Error:", error);
     res.status(500).json({ error: error.message || "An error occurred converting to LaTeX." });
+  }
+});
+
+// 7. Combined AI Curriculum and Lesson Builder
+app.post("/api/gemini/curriculum", async (req, res) => {
+  try {
+    const { subject, notesContent } = req.body;
+    if (!subject) {
+      return res.status(400).json({ error: "Missing subject in request body." });
+    }
+
+    const promptText = `Generate a fully integrated, comprehensive academic Curriculum and modular Lesson Builder for the subject: "${subject}".\n` +
+      `Below is the raw note content provided as background context:\n` +
+      `--- CONTEXT NOTES START ---\n${notesContent || "No context notes provided. Generate a full foundational curriculum based on standard collegiate syllabus."}\n--- CONTEXT NOTES END ---\n\n` +
+      `Your output must divide this subject into exactly 3 robust, logical, chronological Lesson Chunks (e.g. Lesson 1, Lesson 2, Lesson 3).\n` +
+      `For EACH lesson chunk, you must provide:\n` +
+      `1. A Title and estimated completion Duration (e.g., "15 mins").\n` +
+      `2. A comprehensive, beautifully formatted Explanation lecture in Markdown. Include formulas formatted in standard LaTeX ($...$ and $$...$$).\n` +
+      `3. A Multimedia conceptGraph detailing the relationships between the key concepts of that specific lesson. Include at least 3-5 concept nodes with custom descriptive labels and 2-4 linkage paths describing relationships.\n` +
+      `4. A Quiz of exactly 3 relevant multiple-choice questions for that lesson, complete with explanations.\n` +
+      `5. Exactly 3 active-recall Flashcards (front and back) for student self-testing.\n\n` +
+      `Strictly output a JSON object matching the defined curriculum response schema. Use LaTeX for math symbols.`;
+
+    const response = await callGeminiWithFallback({
+      contents: promptText,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          curriculumTitle: { type: Type.STRING },
+          curriculumOverview: { type: Type.STRING },
+          lessons: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                title: { type: Type.STRING },
+                duration: { type: Type.STRING },
+                explanation: { type: Type.STRING },
+                conceptGraph: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    nodes: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          id: { type: Type.STRING },
+                          label: { type: Type.STRING },
+                          description: { type: Type.STRING },
+                          val: { type: Type.INTEGER }
+                        },
+                        required: ["id", "label", "description", "val"]
+                      }
+                    },
+                    links: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          source: { type: Type.STRING },
+                          target: { type: Type.STRING },
+                          relationship: { type: Type.STRING }
+                        },
+                        required: ["source", "target", "relationship"]
+                      }
+                    }
+                  },
+                  required: ["title", "nodes", "links"]
+                },
+                quiz: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      question: { type: Type.STRING },
+                      options: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING }
+                      },
+                      answer: { type: Type.INTEGER },
+                      explanation: { type: Type.STRING }
+                    },
+                    required: ["question", "options", "answer", "explanation"]
+                  }
+                },
+                flashcards: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      front: { type: Type.STRING },
+                      back: { type: Type.STRING }
+                    },
+                    required: ["front", "back"]
+                  }
+                }
+              },
+              required: ["id", "title", "duration", "explanation", "conceptGraph", "quiz", "flashcards"]
+            }
+          }
+        },
+        required: ["curriculumTitle", "curriculumOverview", "lessons"]
+      }
+    });
+
+    const parsedData = JSON.parse(response.text || "{}");
+    res.json(parsedData);
+  } catch (error: any) {
+    console.error("Combined Curriculum API Error:", error);
+    res.status(500).json({ error: error.message || "An error occurred generating curriculum lessons." });
   }
 });
 
