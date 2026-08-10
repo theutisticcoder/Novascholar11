@@ -4,11 +4,7 @@ import { createServer as createViteServer } from "vite";
 import { Mistral } from "@mistralai/mistralai";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import Inception from 'inceptionai';
 
-const client = new Inception({
-  apiKey: process.env['KEY'], // defaults to this env var; can be omitted
-});
 dotenv.config();
 
 const app = express();
@@ -66,20 +62,27 @@ async function callGeminiWithFallback(config: {
   const ai = getAiClient();
   let lastError: any = null;
 
+  for (const modelName of FALLBACK_MODELS) {
     try {
-      const response = await client.chat.completions.create({
-        model: "mercury-2",
-        messages: config.contents,
-        response_format: config.responseSchema,
+      console.log(`Attempting Gemini generation using model: ${modelName}`);
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: config.contents,
+        config: {
+          responseMimeType: config.responseMimeType,
+          responseSchema: config.responseSchema,
+        }
       });
-      console.log(response)
-      var json = await response.json()
-      return json;
+      console.log(`Successfully completed Gemini generation with model: ${modelName}`);
+      return response;
     } catch (err: any) {
+      console.warn(`Model ${modelName} failed or limit reached. Error: ${err?.message || err}`);
       lastError = err;
-      console.error(err)
     }
   }
+
+  throw new Error(`All Gemini Flash-Lite fallback models failed. Last error: ${lastError?.message || lastError}`);
+}
 
 function extractTextContent(content: any): string {
   if (typeof content === "string") return content;
@@ -586,7 +589,7 @@ app.post("/api/gemini/curriculum-chunk", async (req, res) => {
       }
     });
 
-    const parsedData = JSON.parse(response.choices[0].message.content || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("Curriculum Chunk API Error:", error);
@@ -715,4 +718,3 @@ async function startServer() {
 }
 
 startServer();
-
