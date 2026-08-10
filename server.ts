@@ -70,9 +70,7 @@ async function callGeminiWithFallback(config: {
       const response = await client.chat.completions.create({
         model: "mercury-2",
         messages: config.contents,
-        config: {
-          response_format: config.responseSchema,
-        }
+        response_format: config.responseSchema,
       });
       return response;
     } catch (err: any) {
