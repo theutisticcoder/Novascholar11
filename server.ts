@@ -72,7 +72,8 @@ async function callGeminiWithFallback(config: {
         messages: config.contents,
         response_format: config.responseSchema,
       });
-      return response;
+      var json = await response.json()
+      return json;
     } catch (err: any) {
       lastError = err;
     }
