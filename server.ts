@@ -69,7 +69,7 @@ async function callGeminiWithFallback(config: {
     try {
       const response = await client.chat.completions.create({
         model: "mercury-2",
-        content: config.contents,
+        messages: config.contents,
         response_format: config.responseSchema,
       });
       return response;
@@ -583,7 +583,7 @@ app.post("/api/gemini/curriculum-chunk", async (req, res) => {
       }
     });
 
-    const parsedData = JSON.parse(response.text || "{}");
+    const parsedData = JSON.parse(response.choices[0].message.content || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("Curriculum Chunk API Error:", error);
