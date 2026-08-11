@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "react-quill/dist/quill.snow.css";
+@import "react-quill-new/dist/quill.snow.css";
 
 @theme {
   --color-bento-bg: #0b0c10;

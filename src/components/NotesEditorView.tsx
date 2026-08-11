@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react";
 import { Plus, Trash2, FileText, Sparkles, BookOpen, Layers, Edit3, Image as ImageIcon, CheckSquare, ChevronRight, Eye, ListPlus, CornerDownRight, Calculator, Mic, Square, Upload, Loader2 } from "lucide-react";
-import ReactQuill from "react-quill";
+import ReactQuill from "react-quill-new";
 import { Note, NoteType, Course, CornellCue, OutlineItem, MediaItem } from "../types";
 import HandwritingCanvas from "./HandwritingCanvas";
 import MediaManager from "./MediaManager";
