@@ -134,10 +134,18 @@ export default function NotesEditorView({
         const data = await response.json();
         const { transcript, cornellNotes } = data;
 
-        // Update Note with new Cornell Data
+        const transcriptSection = transcript
+          ? `\n\n<h3>Full Unabridged Lecture Transcript</h3>\n` + transcript.split("\n\n").map((p: string) => `<p>${p.trim()}</p>`).join("\n")
+          : "";
+
+        const newMainContent = (activeNote.content || "") +
+          (cornellNotes?.content ? `\n\n${cornellNotes.content}` : "") +
+          transcriptSection;
+
+        // Update Note with new Cornell Data & Full Transcript
         onUpdateNote({
           ...activeNote,
-          content: activeNote.content + "\n\n" + (cornellNotes.content || ""),
+          content: newMainContent,
           summary: activeNote.summary ? (activeNote.summary + "\n\n" + (cornellNotes.summary || "")) : cornellNotes.summary,
           cues: [...(activeNote.cues || []), ...(cornellNotes.cues || []).map((c: any) => ({ ...c, id: `cue-gen-${Date.now()}-${Math.random()}` }))],
           media: [

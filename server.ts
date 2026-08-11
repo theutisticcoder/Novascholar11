@@ -47,11 +47,11 @@ function getAiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Falling back strictly using flash-lite models as requested by user
+// Gemini Flash model fallbacks
 const FALLBACK_MODELS = [
-  "gemini-3.5-flash-lite", // 3.5 flash-lite (Primary)
-  "gemini-3.1-flash-lite", // 3.1 flash-lite (Secondary)
-  "gemini-1.5-flash"       // Standard Flash fallback
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash"
 ];
 
 async function callGeminiWithFallback(config: {
@@ -145,8 +145,8 @@ app.post("/api/gemini/transcribe", async (req, res) => {
     };
 
     const promptText = "Listen to and process this audio recording notes context.\n" +
-      "1. Provide a highly accurate academic transcript filtering out stuttering and filler words.\n" +
-      "2. Generate a structured study summary section with key definitions and actionable takeaways.";
+      "1. CRITICAL: Provide a COMPLETE, FULL-LENGTH, UNABRIDGED academic transcript of everything spoken in the audio recording. Do NOT truncate, summarize, or cut off any spoken content.\n" +
+      "2. Following the unabridged transcript, generate a structured study summary section with key definitions and actionable takeaways.";
 
     const response = await callGeminiWithFallback({
       contents: [audioPart, promptText]
@@ -175,10 +175,11 @@ app.post("/api/gemini/cornell-from-lecture", async (req, res) => {
     };
 
     const promptText = `Analyze this lecture audio for the subject: "${subject || "General Academic"}".\n` +
-      `1. Provide a highly accurate academic transcript of the lecture.\n` +
-      `2. Structure the content into a complete Cornell Note format.\n` +
+      `CRITICAL INSTRUCTIONS FOR TRANSCRIPTION:\n` +
+      `1. You MUST provide the COMPLETE, FULL-LENGTH, UNABRIDGED transcript of the ENTIRE audio file in the 'transcript' field. Do NOT summarize, cut off, or abbreviate the transcript under any circumstances.\n` +
+      `2. Structure the key concepts into a complete Cornell Note format.\n` +
       `3. Extract specific 'Cues' (questions or key terms for the left margin).\n` +
-      `4. Create a comprehensive 'Main Notes' section in clean HTML format (using <p>, <ul>, <li>, <strong>).\n` +
+      `4. Create a comprehensive 'Main Notes' section in clean HTML format (using <p>, <ul>, <li>, <strong>, <h3>).\n` +
       `5. Provide a 'Summary' paragraph for the bottom section.\n` +
       `6. Use LaTeX ($...$ and $$...$$) for any mathematical formulas.\n\n` +
       `Respond ONLY with a JSON object matching the requested schema.`;
@@ -189,7 +190,7 @@ app.post("/api/gemini/cornell-from-lecture", async (req, res) => {
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          transcript: { type: Type.STRING },
+          transcript: { type: Type.STRING, description: "Complete unabridged transcript of the entire audio without truncation." },
           cornellNotes: {
             type: Type.OBJECT,
             properties: {

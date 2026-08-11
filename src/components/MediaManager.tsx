@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Upload, Mic, Square, Trash2, CheckCircle2, AlertCircle, Loader2, Sparkles, FileText, Image as ImageIcon, Headphones } from "lucide-react";
+import { Upload, Mic, Square, Trash2, CheckCircle2, AlertCircle, Loader2, Sparkles, FileText, Image as ImageIcon, Headphones, Copy, Check, Maximize2, Minimize2, X } from "lucide-react";
 import { MediaItem } from "../types";
 
 interface MediaManagerProps {
@@ -14,11 +14,24 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<{ [key: string]: boolean }>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [modalTranscript, setModalTranscript] = useState<{ name: string; text: string } | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleCopyTranscript = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   // Trigger file selection
   const handlePickFile = () => {
@@ -313,20 +326,86 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
                   </button>
                 </div>
 
-                {/* OCR/Transcript Preview */}
+                {/* OCR/Transcript Section */}
                 {item.transcription && (
-                  <div className="mt-2.5 bg-slate-50 border border-slate-100 rounded-lg p-2 max-h-24 overflow-y-auto">
-                    <div className="flex items-center gap-1 mb-1 text-[10px] font-bold text-indigo-600 tracking-wider uppercase">
-                      <Sparkles className="w-3 h-3" />
-                      <span>Gemini AI Insights</span>
+                  <div className="mt-2.5 bg-slate-50 border border-slate-100 rounded-lg p-2.5 space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] font-bold text-indigo-600 tracking-wider uppercase">
+                      <div className="flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-indigo-500" />
+                        <span>{item.type === "audio" ? "Full Transcript" : "AI Extraction"}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-slate-400">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyTranscript(item.id, item.transcription!)}
+                          className="p-1 hover:text-indigo-600 rounded transition cursor-pointer flex items-center gap-0.5"
+                          title="Copy Full Transcript"
+                        >
+                          {copiedId === item.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModalTranscript({ name: item.name, text: item.transcription! })}
+                          className="p-1 hover:text-indigo-600 rounded transition cursor-pointer"
+                          title="View Fullscreen Modal"
+                        >
+                          <Maximize2 className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
+                    <div className={`text-xs text-slate-700 font-normal leading-relaxed whitespace-pre-wrap overflow-y-auto ${expandedIds[item.id] ? "max-h-96" : "max-h-36"}`}>
                       {item.transcription}
-                    </p>
+                    </div>
+                    {item.transcription.length > 150 && (
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(item.id)}
+                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 transition cursor-pointer block pt-1"
+                      >
+                        {expandedIds[item.id] ? "Show Less" : "Show Full Text ↓"}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Modal View for Fullscreen Uncut Transcripts */}
+      {modalTranscript && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-100 bg-slate-50">
+              <div className="flex items-center gap-2 text-slate-800 font-bold text-sm">
+                <FileText className="w-4 h-4 text-indigo-600" />
+                <span>{modalTranscript.name} - Full Transcript</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(modalTranscript.text);
+                    alert("Transcript copied to clipboard!");
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg text-xs font-semibold transition cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalTranscript(null)}
+                  className="p-1 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1 font-sans text-xs md:text-sm text-slate-700 leading-relaxed whitespace-pre-wrap bg-white">
+              {modalTranscript.text}
+            </div>
           </div>
         </div>
       )}
