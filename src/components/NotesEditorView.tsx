@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import { Plus, Trash2, FileText, Sparkles, BookOpen, Layers, Edit3, Image as ImageIcon, CheckSquare, ChevronRight, Eye, ListPlus, CornerDownRight, Calculator } from "lucide-react";
+import React, { useState, useRef } from "react";
+import { Plus, Trash2, FileText, Sparkles, BookOpen, Layers, Edit3, Image as ImageIcon, CheckSquare, ChevronRight, Eye, ListPlus, CornerDownRight, Calculator, Mic, Square, Upload, Loader2 } from "lucide-react";
+import ReactQuill from "react-quill";
 import { Note, NoteType, Course, CornellCue, OutlineItem, MediaItem } from "../types";
 import HandwritingCanvas from "./HandwritingCanvas";
 import MediaManager from "./MediaManager";
@@ -55,6 +56,116 @@ export default function NotesEditorView({
 
   // Local Outline Bullet Form
   const [newOutlineText, setNewOutlineText] = useState("");
+
+  // Recording & Transcription states
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [transcribing, setTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        await handleProcessLecture(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error("Error starting recording:", err);
+      alert("Could not access microphone. Please check permissions.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await handleProcessLecture(file);
+  };
+
+  const handleProcessLecture = async (audioFile: Blob) => {
+    if (!activeNote) return;
+    setTranscribing(true);
+
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(audioFile);
+      reader.onloadend = async () => {
+        const base64Audio = (reader.result as string).split(",")[1];
+        const activeCourse = courses.find(c => c.id === activeNote.courseId);
+
+        const response = await fetch("/api/gemini/cornell-from-lecture", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            audioBase64: base64Audio,
+            mimeType: audioFile.type,
+            subject: activeCourse?.name || "General Academic"
+          })
+        });
+
+        if (!response.ok) throw new Error("Transcription failed");
+
+        const data = await response.json();
+        const { transcript, cornellNotes } = data;
+
+        // Update Note with new Cornell Data
+        onUpdateNote({
+          ...activeNote,
+          content: activeNote.content + "\n\n" + (cornellNotes.content || ""),
+          summary: activeNote.summary ? (activeNote.summary + "\n\n" + (cornellNotes.summary || "")) : cornellNotes.summary,
+          cues: [...(activeNote.cues || []), ...(cornellNotes.cues || []).map((c: any) => ({ ...c, id: `cue-gen-${Date.now()}-${Math.random()}` }))],
+          media: [
+            ...activeNote.media,
+            {
+              id: `lecture-${Date.now()}`,
+              name: `Lecture Transcript (${new Date().toLocaleTimeString()})`,
+              type: "audio",
+              url: URL.createObjectURL(audioFile),
+              transcription: transcript,
+              dateAdded: new Date().toISOString()
+            }
+          ]
+        });
+      };
+    } catch (err) {
+      console.error("Transcription error:", err);
+      alert("An error occurred during lecture processing.");
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
 
   const handleCreateNote = (e: React.FormEvent) => {
     e.preventDefault();
@@ -526,29 +637,84 @@ export default function NotesEditorView({
                           </form>
                         </div>
 
-                        {/* Cornell Content notes column (Right 8 cols) */}
-                        <div className="md:col-span-8 space-y-2">
-                          <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block">Main Notes content</label>
-                          <textarea
-                            rows={15}
-                            value={activeNote.content}
-                            onChange={(e) => handleUpdateContent(e.target.value)}
-                            placeholder="Take complete study lecture notes. Wrap LaTeX math in $...$ for inline and $$...$$ for blocks."
-                            className="w-full p-4 border border-bento-secondary/20 bg-bento-bg text-white rounded-2xl text-sm leading-relaxed focus:outline-none focus:border-bento-primary/60 font-mono"
-                          />
+                      {/* Cornell Content notes column (Right 8 cols) */}
+                        <div className="md:col-span-8 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block">Main Notes content</label>
+                            <div className="flex items-center gap-2">
+                              {transcribing ? (
+                                <div className="flex items-center gap-2 text-[10px] text-bento-primary animate-pulse">
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  <span>Gemini is transcribing lecture...</span>
+                                </div>
+                              ) : isRecording ? (
+                                <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 px-2 py-1 rounded-lg">
+                                  <div className="w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
+                                  <span className="text-[10px] font-bold text-rose-500 font-mono">{formatTime(recordingTime)}</span>
+                                  <button
+                                    onClick={stopRecording}
+                                    className="p-1 hover:bg-rose-500/20 rounded-md transition text-rose-500"
+                                  >
+                                    <Square className="w-3 h-3 fill-rose-500" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={startRecording}
+                                    className="flex items-center gap-1 px-2 py-1 bg-bento-secondary/10 hover:bg-bento-secondary/20 border border-bento-secondary/20 rounded-lg text-[10px] font-bold text-bento-secondary transition"
+                                    title="Record Live Lecture"
+                                  >
+                                    <Mic className="w-3 h-3" />
+                                    <span>Record Lecture</span>
+                                  </button>
+                                  <label className="flex items-center gap-1 px-2 py-1 bg-bento-secondary/10 hover:bg-bento-secondary/20 border border-bento-secondary/20 rounded-lg text-[10px] font-bold text-bento-secondary transition cursor-pointer" title="Upload Audio File">
+                                    <Upload className="w-3 h-3" />
+                                    <span>Upload</span>
+                                    <input type="file" accept="audio/*" className="hidden" onChange={handleFileUpload} />
+                                  </label>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="bg-bento-bg border border-bento-secondary/20 rounded-2xl overflow-hidden quill-editor-wrapper">
+                            <ReactQuill
+                              theme="snow"
+                              value={activeNote.content}
+                              onChange={handleUpdateContent}
+                              placeholder="Take complete study lecture notes or record a lecture for automatic Cornell notes..."
+                              modules={{
+                                toolbar: [
+                                  [{ 'header': [1, 2, 3, false] }],
+                                  ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+                                  [{'list': 'ordered'}, {'list': 'bullet'}, {'indent': '-1'}, {'indent': '+1'}],
+                                  ['link', 'code-block'],
+                                  ['clean']
+                                ],
+                              }}
+                            />
+                          </div>
                         </div>
                       </div>
 
                       {/* Bottom Cornell Summary */}
                       <div className="bg-bento-bg/40 border border-bento-secondary/15 p-4 rounded-2xl space-y-2">
                         <label className="text-xs font-bold text-bento-primary uppercase tracking-wider block">Cornell Summary Panel</label>
-                        <textarea
-                          rows={3}
-                          value={activeNote.summary || ""}
-                          onChange={(e) => handleUpdateSummary(e.target.value)}
-                          placeholder="Summarize the core takeaways of these study notes on the bottom. Focus on high-level active recall insights."
-                          className="w-full p-3 border border-bento-secondary/20 bg-bento-card text-white rounded-xl text-xs leading-relaxed focus:outline-none focus:border-bento-primary/60 font-medium placeholder-bento-text-muted/40"
-                        />
+                        <div className="bg-bento-card border border-bento-secondary/20 rounded-xl overflow-hidden">
+                          <ReactQuill
+                            theme="snow"
+                            value={activeNote.summary || ""}
+                            onChange={handleUpdateSummary}
+                            placeholder="Summarize the core takeaways..."
+                            modules={{
+                              toolbar: [
+                                ['bold', 'italic', 'underline'],
+                                [{'list': 'bullet'}],
+                                ['clean']
+                              ]
+                            }}
+                          />
+                        </div>
                       </div>
                     </div>
                   ) : (
@@ -638,14 +804,22 @@ export default function NotesEditorView({
 
                       {/* Raw outline details content (Right 5 cols) */}
                       <div className="md:col-span-5 space-y-2">
-                        <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block">Raw Notes Reference (Markdown)</label>
-                        <textarea
-                          rows={14}
-                          value={activeNote.content}
-                          onChange={(e) => handleUpdateContent(e.target.value)}
-                          placeholder="Type comprehensive syllabus details..."
-                          className="w-full p-3.5 border border-bento-secondary/20 bg-bento-bg text-white rounded-2xl text-xs leading-relaxed focus:outline-none focus:border-bento-primary/60 font-mono"
-                        />
+                        <label className="text-xs font-bold text-bento-secondary uppercase tracking-wider block">Main Study Content (Rich Text)</label>
+                        <div className="bg-bento-bg border border-bento-secondary/20 rounded-2xl overflow-hidden">
+                          <ReactQuill
+                            theme="snow"
+                            value={activeNote.content}
+                            onChange={handleUpdateContent}
+                            placeholder="Type comprehensive syllabus details..."
+                            modules={{
+                              toolbar: [
+                                ['bold', 'italic', 'underline'],
+                                [{'list': 'bullet'}],
+                                ['clean']
+                              ]
+                            }}
+                          />
+                        </div>
                       </div>
                     </div>
                   )}

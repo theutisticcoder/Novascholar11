@@ -159,6 +159,69 @@ app.post("/api/gemini/transcribe", async (req, res) => {
   }
 });
 
+// 2. Audio/Lecture Transcriber & Cornell Builder
+app.post("/api/gemini/cornell-from-lecture", async (req, res) => {
+  try {
+    const { audioBase64, mimeType, subject } = req.body;
+    if (!audioBase64) {
+      return res.status(400).json({ error: "Missing audio data." });
+    }
+
+    const audioPart = {
+      inlineData: {
+        mimeType: mimeType || "audio/webm",
+        data: audioBase64,
+      },
+    };
+
+    const promptText = `Analyze this lecture audio for the subject: "${subject || "General Academic"}".\n` +
+      `1. Provide a highly accurate academic transcript of the lecture.\n` +
+      `2. Structure the content into a complete Cornell Note format.\n` +
+      `3. Extract specific 'Cues' (questions or key terms for the left margin).\n` +
+      `4. Create a comprehensive 'Main Notes' section in clean HTML format (using <p>, <ul>, <li>, <strong>).\n` +
+      `5. Provide a 'Summary' paragraph for the bottom section.\n` +
+      `6. Use LaTeX ($...$ and $$...$$) for any mathematical formulas.\n\n` +
+      `Respond ONLY with a JSON object matching the requested schema.`;
+
+    const response = await callGeminiWithFallback({
+      contents: [audioPart, promptText],
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          transcript: { type: Type.STRING },
+          cornellNotes: {
+            type: Type.OBJECT,
+            properties: {
+              cues: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    cue: { type: Type.STRING },
+                    noteLineIndex: { type: Type.INTEGER }
+                  },
+                  required: ["cue", "noteLineIndex"]
+                }
+              },
+              content: { type: Type.STRING, description: "Main notes section in clean semantic HTML." },
+              summary: { type: Type.STRING }
+            },
+            required: ["cues", "content", "summary"]
+          }
+        },
+        required: ["transcript", "cornellNotes"]
+      }
+    });
+
+    const parsedData = JSON.parse(response.text || "{}");
+    res.json(parsedData);
+  } catch (error: any) {
+    console.error("Cornell Lecture API Error:", error);
+    res.status(500).json({ error: error.message || "An error occurred during lecture processing." });
+  }
+});
+
 // 2.1 PDF Document Notes Parser
 app.post("/api/gemini/pdf-notes", async (req, res) => {
   try {
@@ -391,7 +454,7 @@ app.post("/api/gemini/curriculum", async (req, res) => {
         `1. A Title.\n` +
         `2. A short duration estimate (e.g. "15 mins").\n` +
         `3. A unique ID (e.g. "topic-${existingCount + 1}").\n\n` +
-        `Respond with a JSON object matching the defined curriculum skeleton schema. Keep curriculumTitle and curriculumOverview consistent or complementary to the subject. Each lesson content should provide in depth content and at least 2 real examples (math/english) or real world scenarios (other topics) of the topic.`;
+        `Respond with a JSON object matching the defined curriculum skeleton schema. Keep curriculumTitle and curriculumOverview consistent or complementary to the subject.`;
     } else {
       promptText = `You are an academic curriculum designer. Generate the FIRST 10 sequential, distinct lessons/topics for a comprehensive academic Curriculum Skeleton for the subject: "${subject}".\n` +
         `We plan to build a complete curriculum of 25-30 topics in multiple generations (generating 10 lessons at a time).\n` +
@@ -400,7 +463,7 @@ app.post("/api/gemini/curriculum", async (req, res) => {
         `1. A Title.\n` +
         `2. A short duration estimate (e.g. "15 mins").\n` +
         `3. A unique ID (e.g. "topic-1").\n\n` +
-        `Respond with a JSON object matching the defined curriculum skeleton schema. Provide a descriptive curriculumTitle and curriculumOverview. Each lesson content should provide in depth content and at least 2 real examples (math/english) or real world scenarios (other topics) of the topic.`;
+        `Respond with a JSON object matching the defined curriculum skeleton schema. Provide a descriptive curriculumTitle and curriculumOverview.`;
     }
 
     if (pdfBase64) {
@@ -718,3 +781,4 @@ async function startServer() {
 }
 
 startServer();
+
