@@ -46,7 +46,6 @@ async function callGeminiWithFallback(config: {
   responseSchema?: any;
 }) {
   let lastError: any = null;
-    try {
   const response = await portkey.chat.completions.create({
     messages: config.contents,
     model: "@novam/ministral-3b-latest",
@@ -55,10 +54,7 @@ async function callGeminiWithFallback(config: {
   });
   console.log(response)
       return response;
-    } catch (err: any) {
-      lastError = err;
-      throw new Error(`${lastError?.message || lastError}`);
-}
+   
   
 
 }
