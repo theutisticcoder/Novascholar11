@@ -52,6 +52,9 @@ function getAiClient(): GoogleGenAI {
   }
   return aiClient;
 }
+  const portkey = new Portkey({
+  apiKey: process.env.PORTKEY
+});
 
 // Gemini Flash model fallbacks
 const FALLBACK_MODELS = [
@@ -66,13 +69,12 @@ async function callGeminiWithFallback(config: {
   let lastError: any = null;
 
     try {
-     const portkey = new Portkey({
-  apiKey: process.env.PORTKEY
-});
+   
 
   const response = await portkey.chat.completions.create({
     messages: contents,
     model: "@novam/ministral-3b-latest",
+    response_format: responseSchema
   });
       return response;
     } catch (err: any) {
