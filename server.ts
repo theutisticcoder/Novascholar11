@@ -4,12 +4,6 @@ import { createServer as createViteServer } from "vite";
 import { Mistral } from "@mistralai/mistralai";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import {Portkey}from 'portkey-ai';
-
-
-
-
-
 
 dotenv.config();
 
@@ -35,28 +29,57 @@ function getMistralClient(): Mistral {
   return mistralClient;
 }
 
+// Lazy initializer for Google Gen AI client
+let aiClient: GoogleGenAI | null = null;
 
-  const portkey = new Portkey({
-  apiKey: process.env.PORTKEY
-});
+function getAiClient(): GoogleGenAI {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY || "AI_STUDIO_DEFAULT_KEY";
+    aiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
+  }
+  return aiClient;
+}
+
+// Gemini Flash model fallbacks
+const FALLBACK_MODELS = [
+  "gemini-3.5-flash-lite",
+];
 
 async function callGeminiWithFallback(config: {
   contents: any;
   responseMimeType?: string;
   responseSchema?: any;
 }) {
+  const ai = getAiClient();
   let lastError: any = null;
-  const response = await portkey.chat.completions.create({
-    messages: config.contents,
-    model: "@novam/ministral-3b-latest",
-    response_format: config.responseSchema,
 
-  });
-  console.log(response)
+  for (const modelName of FALLBACK_MODELS) {
+    try {
+      console.log(`Attempting Gemini generation using model: ${modelName}`);
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: config.contents,
+        config: {
+          responseMimeType: config.responseMimeType,
+          responseSchema: config.responseSchema,
+        }
+      });
+      console.log(`Successfully completed Gemini generation with model: ${modelName}`);
       return response;
-   
-  
+    } catch (err: any) {
+      console.warn(`Model ${modelName} failed or limit reached. Error: ${err?.message || err}`);
+      lastError = err;
+    }
+  }
 
+  throw new Error(`All Gemini Flash-Lite fallback models failed. Last error: ${lastError?.message || lastError}`);
 }
 
 function extractTextContent(content: any): string {
@@ -97,7 +120,7 @@ app.post("/api/gemini/ocr", async (req, res) => {
       contents: [imagePart, promptText]
     });
 
-    res.json({ result: response });
+    res.json({ result: response.text });
   } catch (error: any) {
     console.error("OCR API Error:", error);
     res.status(500).json({ error: error.message || "An error occurred during OCR analysis." });
@@ -127,7 +150,7 @@ app.post("/api/gemini/transcribe", async (req, res) => {
       contents: [audioPart, promptText]
     });
 
-    res.json({ result: response });
+    res.json({ result: response.text });
   } catch (error: any) {
     console.error("Transcription API Error:", error);
     res.status(500).json({ error: error.message || "An error occurred during audio transcription." });
@@ -190,7 +213,7 @@ app.post("/api/gemini/cornell-from-lecture", async (req, res) => {
       }
     });
 
-    const parsedData = JSON.parse(response || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("Cornell Lecture API Error:", error);
@@ -223,7 +246,7 @@ app.post("/api/gemini/pdf-notes", async (req, res) => {
       contents: [pdfPart, promptText]
     });
 
-    res.json({ result: response });
+    res.json({ result: response.text });
   } catch (error: any) {
     console.error("PDF Parsing API Error:", error);
     res.status(500).json({ error: error.message || "An error occurred during PDF parsing." });
@@ -272,7 +295,7 @@ app.post("/api/gemini/study-guide", async (req, res) => {
       }
     });
 
-    const parsedData = JSON.parse(response || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("Study Guide API Error:", error);
@@ -323,7 +346,7 @@ app.post("/api/gemini/quiz", async (req, res) => {
       }
     });
 
-    const parsedData = JSON.parse(response || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("Quiz API Error:", error);
@@ -367,7 +390,7 @@ app.post("/api/gemini/flashcards", async (req, res) => {
       }
     });
 
-    const parsedData = JSON.parse(response || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json({ flashcards: parsedData.flashcards || [] });
   } catch (error: any) {
     console.error("Flashcards API Error:", error);
@@ -400,7 +423,7 @@ app.post("/api/gemini/latex-helper", async (req, res) => {
       }
     });
 
-    const parsedData = JSON.parse(response || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("LaTeX Helper API Error:", error);
@@ -484,7 +507,7 @@ app.post("/api/gemini/curriculum", async (req, res) => {
       }
     });
 
-    const parsedData = JSON.parse(response || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("Curriculum API Error:", error);
@@ -628,7 +651,7 @@ app.post("/api/gemini/curriculum-chunk", async (req, res) => {
       }
     });
 
-    const parsedData = JSON.parse(response || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("Curriculum Chunk API Error:", error);
@@ -725,7 +748,7 @@ app.post("/api/gemini/lesson-content", async (req, res) => {
       }
     });
 
-    const parsedData = JSON.parse(response || "{}");
+    const parsedData = JSON.parse(response.text || "{}");
     res.json(parsedData);
   } catch (error: any) {
     console.error("Lesson Content API Error:", error);
