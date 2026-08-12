@@ -4,6 +4,12 @@ import { createServer as createViteServer } from "vite";
 import { Mistral } from "@mistralai/mistralai";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import Portkey from 'portkey-ai';
+
+
+
+
+
 
 dotenv.config();
 
@@ -57,27 +63,22 @@ async function callGeminiWithFallback(config: {
   responseMimeType?: string;
   responseSchema?: any;
 }) {
-  const ai = getAiClient();
   let lastError: any = null;
 
-  for (const modelName of FALLBACK_MODELS) {
     try {
-      console.log(`Attempting Gemini generation using model: ${modelName}`);
-      const response = await ai.models.generateContent({
-        model: modelName,
-        contents: config.contents,
-        config: {
-          responseMimeType: config.responseMimeType,
-          responseSchema: config.responseSchema,
-        }
-      });
-      console.log(`Successfully completed Gemini generation with model: ${modelName}`);
+     const portkey = new Portkey({
+  apiKey: process.env.PORTKEY
+});
+
+  const response = await portkey.chat.completions.create({
+    messages: contents,
+    model: "@novam/ministral-3b-latest",
+  });
       return response;
     } catch (err: any) {
-      console.warn(`Model ${modelName} failed or limit reached. Error: ${err?.message || err}`);
       lastError = err;
     }
-  }
+  
 
   throw new Error(`All Gemini Flash-Lite fallback models failed. Last error: ${lastError?.message || lastError}`);
 }
