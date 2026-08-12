@@ -4,7 +4,7 @@ import { createServer as createViteServer } from "vite";
 import { Mistral } from "@mistralai/mistralai";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import Portkey from 'portkey-ai';
+import {Portkey}from 'portkey-ai';
 
 
 
