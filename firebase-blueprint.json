@@ -1,0 +1,18 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "collections": {
+      "users_data": {
+        "description": "User specific academic workspace content, notes, schedules, courses, flashcards, and goals",
+        "schema": {
+          "courses": "array",
+          "events": "array",
+          "notes": "array",
+          "goals": "array",
+          "flashcards": "array",
+          "updatedAt": "string"
+        }
+      }
+    }
+  }
+}
