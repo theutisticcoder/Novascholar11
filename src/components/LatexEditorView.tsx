@@ -16,10 +16,21 @@ export default function LatexEditorView({ initialContent = "", onInsertIntoNote 
   const [copied, setCopied] = useState(false);
   const [inserted, setInserted] = useState(false);
   
-  // AI Prompt Assistant state
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
+  const [filterQuery, setFilterQuery] = useState("");
+
+  const popularFormulaPresets = [
+    { name: "Quadratic Formula", code: "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}" },
+    { name: "Euler's Identity", code: "e^{i\\pi} + 1 = 0" },
+    { name: "Gaussian Integral", code: "\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}" },
+    { name: "Fourier Transform", code: "\\hat{f}(\\xi) = \\int_{-\\infty}^{\\infty} f(x) e^{-2\\pi i x \\xi} dx" },
+    { name: "Standard Deviation", code: "\\sigma = \\sqrt{\\frac{1}{N} \\sum_{i=1}^{N} (x_i - \\mu)^2}" },
+    { name: "Bayes' Theorem", code: "P(A|B) = \\frac{P(B|A) P(A)}{P(B)}" },
+    { name: "Matrix Multiplication", code: "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix} \\begin{pmatrix} e & f \\\\ g & h \\end{pmatrix} = \\begin{pmatrix} ae+bg & af+bh \\\\ ce+dg & cf+dh \\end{pmatrix}" }
+  ];
+
+  const filteredPresets = popularFormulaPresets.filter(
+    (p) => p.name.toLowerCase().includes(filterQuery.toLowerCase()) || p.code.toLowerCase().includes(filterQuery.toLowerCase())
+  );
 
   // Active Category for Snippets Palette
   const [activeSnippetCategory, setActiveSnippetCategory] = useState<"basic" | "calculus" | "matrix" | "greek" | "logic">("basic");
@@ -112,41 +123,9 @@ export default function LatexEditorView({ initialContent = "", onInsertIntoNote 
     }
   };
 
-  const handleGenerateAiLatex = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!aiPrompt.trim()) return;
-
-    setAiLoading(true);
-    setAiError(null);
-
-    try {
-      const response = await fetch("/api/gemini/latex-helper", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: aiPrompt }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Failed to generate LaTeX formula.");
-      }
-
-      const data = await response.json();
-      if (data.latex) {
-        setLatexCode((prev) => prev + `\n\n% ${aiPrompt}\n$$${data.latex}$$`);
-        setAiPrompt("");
-      }
-    } catch (err: any) {
-      console.error(err);
-      setAiError(err.message || "Failed to request Mistral LaTeX conversion.");
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
-      {/* Top Banner & Quick AI Math Converter */}
+      {/* Top Banner & Quick Math Presets */}
       <div className="bg-bento-card border border-bento-secondary/20 p-5 rounded-3xl shadow-md space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-bento-secondary/10 pb-3">
           <div className="flex items-center gap-2">
@@ -155,7 +134,7 @@ export default function LatexEditorView({ initialContent = "", onInsertIntoNote 
             </div>
             <div>
               <h3 className="text-sm font-extrabold text-white">Interactive LaTeX Math Studio</h3>
-              <p className="text-[11px] text-bento-text-muted">Compose, preview, and generate typesetting formulas powered by Mistral AI (mistral-small-2506)</p>
+              <p className="text-[11px] text-bento-text-muted">Compose, preview, and typeset formulas using the LaTeX symbol palette and math rendering engine</p>
             </div>
           </div>
 
@@ -180,31 +159,31 @@ export default function LatexEditorView({ initialContent = "", onInsertIntoNote 
           </div>
         </div>
 
-        {/* AI Math Generator Prompt */}
-        <form onSubmit={handleGenerateAiLatex} className="flex gap-2 items-center">
-          <div className="relative flex-1">
-            <Wand2 className="w-4 h-4 text-bento-primary absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        {/* Quick Formula Search & Filter */}
+        <div className="space-y-2">
+          <div className="relative">
             <input
               type="text"
-              placeholder="Describe a formula in natural language e.g. 'Quadratic equation', 'Fourier transform', 'Matrix determinant'..."
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              className="w-full pl-10 pr-3 py-2.5 bg-bento-bg border border-bento-secondary/20 rounded-xl text-xs text-white placeholder-bento-text-muted/40 focus:outline-none focus:border-bento-primary/65"
+              placeholder="Search formula presets e.g. 'Quadratic', 'Fourier', 'Bayes', 'Integral'..."
+              value={filterQuery}
+              onChange={(e) => setFilterQuery(e.target.value)}
+              className="w-full pl-3 pr-3 py-2 bg-bento-bg border border-bento-secondary/20 rounded-xl text-xs text-white placeholder-bento-text-muted/40 focus:outline-none focus:border-bento-primary/65"
             />
           </div>
-          <button
-            type="submit"
-            disabled={aiLoading || !aiPrompt.trim()}
-            className="px-4 py-2.5 bg-bento-primary/15 hover:bg-bento-primary/25 text-bento-primary border border-bento-primary/30 rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 disabled:opacity-40"
-          >
-            {aiLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            <span>{aiLoading ? "Generating..." : "AI Generate"}</span>
-          </button>
-        </form>
 
-        {aiError && (
-          <p className="text-xs text-rose-400 font-medium pl-1">{aiError}</p>
-        )}
+          <div className="flex flex-wrap gap-2 pt-1">
+            {filteredPresets.map((preset, idx) => (
+              <button
+                key={idx}
+                onClick={() => setLatexCode((prev) => prev + `\n\n% ${preset.name}\n$$${preset.code}$$`)}
+                className="px-2.5 py-1 bg-bento-bg hover:bg-bento-primary/10 border border-bento-secondary/20 hover:border-bento-primary/40 text-bento-primary text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" />
+                <span>{preset.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Snippet Symbols Toolbar Palette */}

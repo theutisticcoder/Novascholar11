@@ -47,14 +47,14 @@ export default function DashboardView({
         </div>
         <div className="relative z-10 max-w-2xl">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-bento-primary/10 text-bento-primary text-xs font-semibold mb-3 border border-bento-primary/20">
-            <Sparkles className="w-3.5 h-3.5" />
-            AI-Powered Academic Engine
+            <BookOpen className="w-3.5 h-3.5" />
+            Integrated Academic Engine
           </span>
           <h2 className="text-2xl md:text-3xl font-black tracking-tight mb-2 text-white">
             Welcome to your Academic Hub
           </h2>
           <p className="text-bento-text-muted text-sm leading-relaxed mb-6">
-            Manage your course deliverables, sketch visual diagrams, typeset LaTeX mathematics, and use the companion AI to generate active-recall quizzes and study guides.
+            Manage your course deliverables, sketch visual diagrams, typeset LaTeX mathematics, and use the study suite to practice active recall quizzes and study guides.
           </p>
           <div className="flex flex-wrap gap-3">
             <button
@@ -68,8 +68,8 @@ export default function DashboardView({
               onClick={() => onNavigate("ai-companion")}
               className="flex items-center gap-1.5 px-4.5 py-2.5 bg-bento-card/60 hover:bg-bento-card/90 text-white text-xs font-bold rounded-xl transition border border-bento-secondary/30 cursor-pointer"
             >
-              <Sparkles className="w-4 h-4 text-bento-primary" />
-              <span>AI Study Suite</span>
+              <BookOpen className="w-4 h-4 text-bento-primary" />
+              <span>Study Suite</span>
             </button>
           </div>
         </div>

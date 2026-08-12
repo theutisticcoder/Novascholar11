@@ -6,6 +6,7 @@ import {
   Award,
   Target,
   Sparkles,
+  Layers,
   FileText,
   HelpCircle,
   CheckCircle,
@@ -380,14 +381,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-bento-bg text-bento-text-muted font-sans selection:bg-bento-primary/30 selection:text-white">
-      {/* Dynamic top bar notifier for API Keys configuration */}
-      {!apiConfigured && (
-        <div className="bg-amber-950/80 border-b border-amber-500/20 text-amber-300 text-xs text-center py-2.5 px-4 flex items-center justify-center gap-1.5 font-semibold z-50">
-          <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
-          <span>GEMINI_API_KEY is currently missing. AI features require adding your key in the Secrets panel.</span>
-        </div>
-      )}
-
       {/* Dynamic top bar notifier for Backup Status */}
       {backupMessage && (
         <div className={`border-b text-xs text-center py-2.5 px-4 flex items-center justify-center gap-1.5 font-semibold z-50 ${
@@ -447,7 +440,7 @@ export default function App() {
               { id: "courses", label: "Grade Tracker", icon: Award },
               { id: "notes", label: "Study Notes", icon: FileText },
               { id: "calendar", label: "Schedules", icon: CalendarIcon },
-              { id: "ai-companion", label: "AI Study Suite", icon: Sparkles },
+              { id: "ai-companion", label: "Study Suite", icon: Layers },
               { id: "goals", label: "Goal Roadmaps", icon: Target }
             ].map((tab) => {
               const Icon = tab.icon;

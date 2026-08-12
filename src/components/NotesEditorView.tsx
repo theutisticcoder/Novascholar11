@@ -113,57 +113,22 @@ export default function NotesEditorView({
     setTranscribing(true);
 
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(audioFile);
-      reader.onloadend = async () => {
-        const base64Audio = (reader.result as string).split(",")[1];
-        const activeCourse = courses.find(c => c.id === activeNote.courseId);
-
-        const response = await fetch("/api/gemini/cornell-from-lecture", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            audioBase64: base64Audio,
-            mimeType: audioFile.type,
-            subject: activeCourse?.name || "General Academic"
-          })
-        });
-
-        if (!response.ok) throw new Error("Transcription failed");
-
-        const data = await response.json();
-        const { transcript, cornellNotes } = data;
-
-        const transcriptSection = transcript
-          ? `\n\n<h3>Full Unabridged Lecture Transcript</h3>\n` + transcript.split("\n\n").map((p: string) => `<p>${p.trim()}</p>`).join("\n")
-          : "";
-
-        const newMainContent = (activeNote.content || "") +
-          (cornellNotes?.content ? `\n\n${cornellNotes.content}` : "") +
-          transcriptSection;
-
-        // Update Note with new Cornell Data & Full Transcript
-        onUpdateNote({
-          ...activeNote,
-          content: newMainContent,
-          summary: activeNote.summary ? (activeNote.summary + "\n\n" + (cornellNotes.summary || "")) : cornellNotes.summary,
-          cues: [...(activeNote.cues || []), ...(cornellNotes.cues || []).map((c: any) => ({ ...c, id: `cue-gen-${Date.now()}-${Math.random()}` }))],
-          media: [
-            ...activeNote.media,
-            {
-              id: `lecture-${Date.now()}`,
-              name: `Lecture Transcript (${new Date().toLocaleTimeString()})`,
-              type: "audio",
-              url: URL.createObjectURL(audioFile),
-              transcription: transcript,
-              dateAdded: new Date().toISOString()
-            }
-          ]
-        });
+      const audioUrl = URL.createObjectURL(audioFile);
+      const newMedia: MediaItem = {
+        id: `lecture-${Date.now()}`,
+        name: `Recorded Audio Note (${new Date().toLocaleTimeString()})`,
+        type: "audio",
+        url: audioUrl,
+        transcription: "Audio recording attached to note.",
+        dateAdded: new Date().toISOString()
       };
-    } catch (err) {
-      console.error("Transcription error:", err);
-      alert("An error occurred during lecture processing.");
+
+      onUpdateNote({
+        ...activeNote,
+        media: [...activeNote.media, newMedia]
+      });
+    } catch (err: any) {
+      console.error("Error processing recording:", err);
     } finally {
       setTranscribing(false);
     }

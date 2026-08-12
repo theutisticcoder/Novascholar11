@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
-import { Upload, Mic, Square, Trash2, CheckCircle2, AlertCircle, Loader2, Sparkles, FileText, Image as ImageIcon, Headphones, Copy, Check, Maximize2, Minimize2, X } from "lucide-react";
+import { Upload, Mic, Square, Trash2, AlertCircle, Loader2, FileText, Image as ImageIcon, Headphones, Copy, Check, Maximize2, X, Edit2 } from "lucide-react";
+import Tesseract from "tesseract.js";
 import { MediaItem } from "../types";
 
 interface MediaManagerProps {
@@ -12,13 +13,16 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string>("Processing file...");
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [expandedIds, setExpandedIds] = useState<{ [key: string]: boolean }>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [modalTranscript, setModalTranscript] = useState<{ name: string; text: string } | null>(null);
+  const [liveSpeechText, setLiveSpeechText] = useState<string>("");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recognitionRef = useRef<any>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -33,74 +37,33 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Trigger file selection
   const handlePickFile = () => {
     fileInputRef.current?.click();
   };
 
-  // Convert File to Base64
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64String = reader.result as string;
-        // Strip out the data URL prefix for the API
-        resolve(base64String.split(",")[1]);
-      };
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  // Handle file uploads
+  // Handle file uploads with Tesseract open OCR and client processing
   const handleUploadFile = async (file: File) => {
     setLoading(true);
     setError(null);
     try {
-      const base64 = await fileToBase64(file);
       let type: "image" | "audio" | "document" = "document";
-      let endpoint = "";
-      let payloadKey = "";
+      let transcription = "";
 
       if (file.type.startsWith("image/")) {
         type = "image";
-        endpoint = "/api/gemini/ocr";
-        payloadKey = "imageBase64";
+        setLoadingMessage("Running Tesseract Open OCR engine on image...");
+        const result = await Tesseract.recognize(file, "eng");
+        transcription = result.data.text ? result.data.text.trim() : "No text detected in image by Tesseract OCR.";
       } else if (file.type.startsWith("audio/")) {
         type = "audio";
-        endpoint = "/api/gemini/transcribe";
-        payloadKey = "audioBase64";
-      } else if (file.type === "application/pdf") {
+        transcription = liveSpeechText.trim() || `Audio file attached: ${file.name}`;
+      } else if (file.type === "application/pdf" || file.type.startsWith("text/")) {
         type = "document";
-        endpoint = "/api/gemini/pdf-notes";
-        payloadKey = "pdfBase64";
-      }
-
-      let transcription = "";
-
-      // Call server OCR/Transcription if applicable
-      if (endpoint) {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            [payloadKey]: base64,
-            mimeType: file.type,
-          }),
-        });
-
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || "Server processing failed.");
-        }
-
-        const data = await response.json();
-        transcription = data.result || "";
-      } else {
-        // Plain text documents
+        setLoadingMessage("Reading document text...");
         if (file.type === "text/plain") {
-          const text = await file.text();
-          transcription = text;
+          transcription = await file.text();
+        } else {
+          transcription = `Document attachment: ${file.name}`;
         }
       }
 
@@ -114,6 +77,7 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
       };
 
       onAddMedia(newItem);
+      setLiveSpeechText("");
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Failed to process media file.");
@@ -148,13 +112,15 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
     }
   };
 
-  // Audio Recording (Microphone)
+  // Voice Dictation with Web Speech API
   const startRecording = async () => {
     setError(null);
     audioChunksRef.current = [];
+    setLiveSpeechText("");
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -165,12 +131,31 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
+        const audioFile = new File([audioBlob], `lecture-recording-${Date.now()}.webm`, { type: "audio/webm" });
         await handleUploadFile(audioFile);
 
-        // Turn off mic stream
         stream.getTracks().forEach((track) => track.stop());
       };
+
+      // Try browser Web Speech API for real-time dictation
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+
+        recognition.onresult = (event: any) => {
+          let text = "";
+          for (let i = 0; i < event.results.length; i++) {
+            text += event.results[i][0].transcript + " ";
+          }
+          setLiveSpeechText(text);
+        };
+
+        recognition.start();
+        recognitionRef.current = recognition;
+      }
 
       mediaRecorder.start();
       setIsRecording(true);
@@ -186,6 +171,9 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
   };
 
   const stopRecording = () => {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+    }
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
@@ -193,7 +181,6 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
     }
   };
 
-  // Formatting seconds to MM:SS
   const formatTime = (secs: number) => {
     const mins = Math.floor(secs / 60);
     const remainingSecs = secs % 60;
@@ -235,21 +222,21 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
             or drag and drop
           </div>
           <p className="text-xs text-slate-500">
-            Images (OCR), Audio (Transcripts), PDF Docs, or Text (.txt)
+            Images (Tesseract Open OCR), Audio recordings, PDF Docs, or Text (.txt)
           </p>
         </div>
       </div>
 
-      {/* Voice Recorder Block */}
-      <div className="flex items-center justify-between p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm">
+      {/* Voice Recorder Block with Web Speech Dictation */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between p-3.5 bg-white border border-slate-200 rounded-xl shadow-sm gap-3">
         <div className="flex items-center gap-3">
           <div className={`p-2.5 rounded-lg ${isRecording ? "bg-rose-50 text-rose-600 animate-pulse" : "bg-slate-100 text-slate-500"}`}>
             <Mic className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="text-sm font-semibold text-slate-800">Record Lecture Audio</h4>
+            <h4 className="text-sm font-semibold text-slate-800">Record Voice / Speech Dictation</h4>
             <p className="text-xs text-slate-500">
-              {isRecording ? `Recording active: ${formatTime(recordingTime)}` : "Record direct from microphone for speech-to-text"}
+              {isRecording ? `Dictating live: ${formatTime(recordingTime)}` : "Record speech using browser Web Speech dictation"}
             </p>
           </div>
         </div>
@@ -257,7 +244,7 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
         <button
           type="button"
           onClick={isRecording ? stopRecording : startRecording}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition cursor-pointer ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition cursor-pointer self-start md:self-auto ${
             isRecording
               ? "bg-rose-600 text-white hover:bg-rose-700 shadow-sm"
               : "bg-slate-900 text-white hover:bg-slate-800 shadow-sm"
@@ -266,24 +253,31 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
           {isRecording ? (
             <>
               <Square className="w-4 h-4 fill-current" />
-              <span>Stop</span>
+              <span>Stop Dictation</span>
             </>
           ) : (
             <>
               <Mic className="w-4 h-4" />
-              <span>Record</span>
+              <span>Start Dictation</span>
             </>
           )}
         </button>
       </div>
+
+      {/* Live dictation preview */}
+      {isRecording && liveSpeechText && (
+        <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
+          <span className="font-bold text-indigo-600 block mb-1">Live Dictation Transcript:</span>
+          <p className="italic leading-relaxed">{liveSpeechText}</p>
+        </div>
+      )}
 
       {/* Processing State */}
       {loading && (
         <div className="flex items-center gap-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-indigo-700 text-sm">
           <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
           <div className="flex-1">
-            <span className="font-semibold text-indigo-800">AI Processing Media...</span>
-            <span className="text-xs block text-indigo-600">Running advanced OCR math formulas or transcribing dictation via Gemini 3.6 Flash</span>
+            <span className="font-semibold text-indigo-800">{loadingMessage}</span>
           </div>
         </div>
       )}
@@ -299,7 +293,7 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
       {/* Uploaded Media Inventory */}
       {media.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Uploaded Media ({media.length})</h4>
+          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Uploaded Attachments ({media.length})</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {media.map((item) => (
               <div key={item.id} className="flex flex-col p-3 bg-white border border-slate-200 rounded-xl hover:shadow-sm transition">
@@ -331,15 +325,15 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
                   <div className="mt-2.5 bg-slate-50 border border-slate-100 rounded-lg p-2.5 space-y-1.5">
                     <div className="flex items-center justify-between text-[10px] font-bold text-indigo-600 tracking-wider uppercase">
                       <div className="flex items-center gap-1">
-                        <Sparkles className="w-3 h-3 text-indigo-500" />
-                        <span>{item.type === "audio" ? "Full Transcript" : "AI Extraction"}</span>
+                        <FileText className="w-3 h-3 text-indigo-500" />
+                        <span>{item.type === "image" ? "Tesseract Open OCR" : "Text Record"}</span>
                       </div>
                       <div className="flex items-center gap-1 text-slate-400">
                         <button
                           type="button"
                           onClick={() => handleCopyTranscript(item.id, item.transcription!)}
                           className="p-1 hover:text-indigo-600 rounded transition cursor-pointer flex items-center gap-0.5"
-                          title="Copy Full Transcript"
+                          title="Copy Text"
                         >
                           {copiedId === item.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                         </button>
@@ -347,7 +341,7 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
                           type="button"
                           onClick={() => setModalTranscript({ name: item.name, text: item.transcription! })}
                           className="p-1 hover:text-indigo-600 rounded transition cursor-pointer"
-                          title="View Fullscreen Modal"
+                          title="View Fullscreen"
                         >
                           <Maximize2 className="w-3 h-3" />
                         </button>
@@ -373,21 +367,21 @@ export default function MediaManager({ media, onAddMedia, onRemoveMedia }: Media
         </div>
       )}
 
-      {/* Modal View for Fullscreen Uncut Transcripts */}
+      {/* Modal View for Fullscreen Transcripts */}
       {modalTranscript && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-100 bg-slate-50">
               <div className="flex items-center gap-2 text-slate-800 font-bold text-sm">
                 <FileText className="w-4 h-4 text-indigo-600" />
-                <span>{modalTranscript.name} - Full Transcript</span>
+                <span>{modalTranscript.name} - Extracted Text</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
                     navigator.clipboard.writeText(modalTranscript.text);
-                    alert("Transcript copied to clipboard!");
+                    alert("Text copied to clipboard!");
                   }}
                   className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg text-xs font-semibold transition cursor-pointer"
                 >
