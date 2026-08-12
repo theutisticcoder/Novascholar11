@@ -57,10 +57,10 @@ async function callGeminiWithFallback(config: {
       return response;
     } catch (err: any) {
       lastError = err;
-    }
+      throw new Error(`${lastError?.message || lastError}`);
+}
   
 
-  throw new Error(`All Gemini Flash-Lite fallback models failed. Last error: ${lastError?.message || lastError}`);
 }
 
 function extractTextContent(content: any): string {
