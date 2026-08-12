@@ -83,52 +83,86 @@ export default function App() {
 
   // Navigation tab state
   const [activeTab, setActiveTab] = useState<string>("dashboard");
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error(e);
+    }
+    setCurrentUser(null);
+  };
   const [apiConfigured, setApiConfigured] = useState<boolean>(true);
   const [confirmReset, setConfirmReset] = useState<boolean>(false);
   const [backupMessage, setBackupMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Listen to Auth State Change
+  // Listen to Auth State Change and restore saved session
   useEffect(() => {
+    const savedActiveUser = localStorage.getItem("novascholar_active_user");
+    if (savedActiveUser) {
+      try {
+        const parsed = JSON.parse(savedActiveUser);
+        setCurrentUser(parsed);
+      } catch (e) {
+        console.error("Error parsing local active user", e);
+      }
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // Logged in
-        setCurrentUser(user);
-        // Load data from firestore
-        try {
-          const userDocRef = doc(db, "users_data", user.uid);
-          const userDocSnap = await getDoc(userDocRef);
-          if (userDocSnap.exists()) {
-            const data = userDocSnap.data();
-            if (data.courses) setCourses(data.courses);
-            if (data.events) setEvents(data.events);
-            if (data.notes) setNotes(data.notes);
-            if (data.goals) setGoals(data.goals);
-            if (data.flashcards) setFlashcards(data.flashcards);
-            if (data.notes && data.notes.length > 0) {
-              setSelectedNoteId(data.notes[0].id);
-            }
-          } else {
-            // First time login - save existing local state to firestore as initializer
-            await setDoc(userDocRef, {
-              courses,
-              events,
-              notes,
-              goals,
-              flashcards,
-              updatedAt: new Date().toISOString()
-            });
-          }
-        } catch (err) {
-          console.error("Error loading user data from Firestore:", err);
-        }
-      } else {
-        // Logged out
+        const activeUser = {
+          uid: user.uid,
+          email: user.email || "",
+          displayName: user.displayName || user.email?.split("@")[0] || "Scholar"
+        };
+        setCurrentUser(activeUser);
+        localStorage.setItem("novascholar_active_user", JSON.stringify(activeUser));
+      } else if (!localStorage.getItem("novascholar_active_user")) {
         setCurrentUser(null);
       }
       setAuthLoading(false);
     });
+
+    setAuthLoading(false);
     return () => unsubscribe();
   }, []);
+
+  // Sync state from Firestore when user logs in or switches account
+  useEffect(() => {
+    if (!currentUser) return;
+
+    async function loadUserData() {
+      try {
+        const userDocRef = doc(db, "users_data", currentUser.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          const data = userDocSnap.data();
+          if (data.courses) setCourses(data.courses);
+          if (data.events) setEvents(data.events);
+          if (data.notes) setNotes(data.notes);
+          if (data.goals) setGoals(data.goals);
+          if (data.flashcards) setFlashcards(data.flashcards);
+          if (data.notes && data.notes.length > 0) {
+            setSelectedNoteId(data.notes[0].id);
+          }
+        } else {
+          // Initialize user data in Firestore
+          await setDoc(userDocRef, {
+            courses,
+            events,
+            notes,
+            goals,
+            flashcards,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      } catch (err) {
+        console.error("Error loading user data from Firestore:", err);
+      }
+    }
+
+    loadUserData();
+  }, [currentUser?.uid]);
 
   // Sync state to Firestore on change when logged in
   useEffect(() => {
@@ -151,7 +185,7 @@ export default function App() {
     }, 1500); // 1.5s debounce to throttle firestore write rate
 
     return () => clearTimeout(delayDebounce);
-  }, [courses, events, notes, goals, flashcards, currentUser]);
+  }, [courses, events, notes, goals, flashcards, currentUser?.uid]);
 
   // One-time clear of default storage to ensure a clean slate
   useEffect(() => {
@@ -398,7 +432,7 @@ export default function App() {
               <UserIcon className="w-4 h-4" />
             </div>
             <button
-              onClick={() => signOut(auth)}
+              onClick={handleSignOut}
               className="p-2 hover:bg-rose-950/40 hover:text-rose-400 rounded-xl text-bento-text-muted/60 transition cursor-pointer"
               title="Sign Out"
             >
@@ -477,7 +511,7 @@ export default function App() {
                 <UserIcon className="w-4 h-4" />
               </div>
               <button
-                onClick={() => signOut(auth)}
+                onClick={handleSignOut}
                 className="p-2 hover:bg-rose-950/40 hover:text-rose-400 border border-transparent hover:border-rose-500/10 rounded-xl text-bento-text-muted/60 transition cursor-pointer"
                 title="Sign Out of Workspace"
               >

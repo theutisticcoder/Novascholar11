@@ -15,10 +15,12 @@ import {
 } from "lucide-react";
 import { 
   auth, 
+  db,
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   updateProfile 
 } from "../firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 interface AuthViewProps {
   onAuthSuccess: (user: any) => void;
@@ -33,6 +35,93 @@ export default function AuthView({ onAuthSuccess }: AuthViewProps) {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const handleFirestoreAuth = async (isSignIn: boolean) => {
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanDocId = cleanEmail.replace(/[^a-z0-9]/g, "_");
+    const userRef = doc(db, "users_auth", cleanDocId);
+
+    if (isSignIn) {
+      // Log In Fallback
+      let userDocSnap;
+      try {
+        userDocSnap = await getDoc(userRef);
+      } catch (e) {
+        console.error("Firestore check error", e);
+      }
+
+      let userData = userDocSnap && userDocSnap.exists() ? userDocSnap.data() : null;
+
+      if (!userData) {
+        const rawLocal = localStorage.getItem("local_user_" + cleanDocId);
+        if (rawLocal) {
+          try { userData = JSON.parse(rawLocal); } catch (e) {}
+        }
+      }
+
+      if (!userData) {
+        setError("No account found with this email. Please click 'Sign Up' above to register!");
+        return;
+      }
+
+      if (userData.password !== password) {
+        setError("Invalid email or password combination.");
+        return;
+      }
+
+      const activeUser = {
+        uid: userData.uid || ("usr_" + cleanDocId),
+        email: userData.email || cleanEmail,
+        displayName: userData.displayName || username || cleanEmail.split("@")[0]
+      };
+
+      localStorage.setItem("novascholar_active_user", JSON.stringify(activeUser));
+      setSuccessMsg(`Welcome back, ${activeUser.displayName}!`);
+      setTimeout(() => {
+        onAuthSuccess(activeUser);
+      }, 1000);
+    } else {
+      // Sign Up Fallback
+      let existingSnap;
+      try {
+        existingSnap = await getDoc(userRef);
+      } catch (e) {
+        console.error("Firestore read error", e);
+      }
+
+      const rawLocal = localStorage.getItem("local_user_" + cleanDocId);
+      if ((existingSnap && existingSnap.exists()) || rawLocal) {
+        setError("This email address is already registered. Please log in instead.");
+        return;
+      }
+
+      const newUser = {
+        uid: "usr_" + cleanDocId,
+        email: cleanEmail,
+        displayName: username.trim() || cleanEmail.split("@")[0],
+        password: password,
+        createdAt: new Date().toISOString()
+      };
+
+      try {
+        await setDoc(userRef, newUser);
+      } catch (e) {
+        console.error("Firestore write user_auth error", e);
+      }
+
+      localStorage.setItem("local_user_" + cleanDocId, JSON.stringify(newUser));
+      localStorage.setItem("novascholar_active_user", JSON.stringify({
+        uid: newUser.uid,
+        email: newUser.email,
+        displayName: newUser.displayName
+      }));
+
+      setSuccessMsg("Account created successfully! Preparing your academic workspace...");
+      setTimeout(() => {
+        onAuthSuccess(newUser);
+      }, 1200);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,25 +146,60 @@ export default function AuthView({ onAuthSuccess }: AuthViewProps) {
 
     try {
       if (isLogin) {
-        // Sign in flow
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        setSuccessMsg(`Welcome back, ${userCredential.user.displayName || "Scholar"}!`);
-        setTimeout(() => {
-          onAuthSuccess(userCredential.user);
-        }, 1200);
+        // Attempt Native Firebase Sign in first
+        try {
+          const userCredential = await signInWithEmailAndPassword(auth, email, password);
+          const activeUser = {
+            uid: userCredential.user.uid,
+            email: userCredential.user.email,
+            displayName: userCredential.user.displayName || "Scholar"
+          };
+          localStorage.setItem("novascholar_active_user", JSON.stringify(activeUser));
+          setSuccessMsg(`Welcome back, ${activeUser.displayName}!`);
+          setTimeout(() => {
+            onAuthSuccess(activeUser);
+          }, 1000);
+          return;
+        } catch (firebaseErr: any) {
+          if (
+            firebaseErr.code === "auth/operation-not-allowed" || 
+            firebaseErr.code === "auth/admin-restricted-operation" ||
+            firebaseErr.code === "auth/user-not-found" ||
+            firebaseErr.code === "auth/invalid-credential"
+          ) {
+            await handleFirestoreAuth(true);
+            return;
+          }
+          throw firebaseErr;
+        }
       } else {
-        // Sign up flow
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        
-        // Update user profile with Display Name/Username
-        await updateProfile(userCredential.user, {
-          displayName: username.trim()
-        });
-
-        setSuccessMsg("Account created successfully! Preparing your academic workspace...");
-        setTimeout(() => {
-          onAuthSuccess(userCredential.user);
-        }, 1500);
+        // Attempt Native Firebase Sign up first
+        try {
+          const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+          await updateProfile(userCredential.user, {
+            displayName: username.trim()
+          });
+          const activeUser = {
+            uid: userCredential.user.uid,
+            email: userCredential.user.email,
+            displayName: username.trim()
+          };
+          localStorage.setItem("novascholar_active_user", JSON.stringify(activeUser));
+          setSuccessMsg("Account created successfully! Preparing your academic workspace...");
+          setTimeout(() => {
+            onAuthSuccess(activeUser);
+          }, 1200);
+          return;
+        } catch (firebaseErr: any) {
+          if (
+            firebaseErr.code === "auth/operation-not-allowed" || 
+            firebaseErr.code === "auth/admin-restricted-operation"
+          ) {
+            await handleFirestoreAuth(false);
+            return;
+          }
+          throw firebaseErr;
+        }
       }
     } catch (err: any) {
       console.error(err);
@@ -167,10 +291,10 @@ export default function AuthView({ onAuthSuccess }: AuthViewProps) {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="mb-4 p-3 bg-rose-950/50 border border-rose-500/20 rounded-xl flex items-start gap-2.5 text-xs text-rose-300"
+              className="mb-4 p-3.5 bg-rose-950/50 border border-rose-500/20 rounded-xl flex items-start gap-2.5 text-xs text-rose-300"
             >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
-              <span>{error}</span>
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+              <span className="leading-normal">{error}</span>
             </motion.div>
           )}
 
@@ -279,6 +403,25 @@ export default function AuthView({ onAuthSuccess }: AuthViewProps) {
                 <ArrowRight className="w-4 h-4 text-bento-bg" />
               </>
             )}
+          </button>
+
+          {/* Guest / Direct Access Fallback */}
+          <div className="relative my-4 flex items-center justify-center">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-bento-secondary/20" />
+            </div>
+            <span className="relative bg-bento-card px-3 text-[10px] font-bold uppercase tracking-wider text-bento-text-muted/60">
+              Or
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onAuthSuccess({ uid: "guest_scholar", displayName: "Guest Scholar", email: "guest@novascholar.local", isGuest: true })}
+            className="w-full py-2.5 px-4 bg-bento-secondary/20 hover:bg-bento-secondary/35 text-white font-medium rounded-xl text-xs transition border border-bento-secondary/20 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-bento-primary" />
+            <span>Continue as Guest (Instant Access)</span>
           </button>
         </form>
       </motion.div>

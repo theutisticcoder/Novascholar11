@@ -30,8 +30,9 @@ const app = initializeApp(firebaseConfig);
 // Initialize Auth
 export const auth = getAuth(app);
 
-// Initialize Firestore
-export const db = getFirestore(app);
+// Initialize Firestore with specific database ID
+export const DATABASE_ID = "ai-studio-novascholar-43309b7d-4390-4249-87a2-d3c11ac19581";
+export const db = getFirestore(app, DATABASE_ID);
 
 export { 
   signInWithEmailAndPassword, 
