@@ -48,9 +48,9 @@ async function callGeminiWithFallback(config: {
   let lastError: any = null;
     try {
   const response = await portkey.chat.completions.create({
-    messages: contents,
+    messages: config.contents,
     model: "@novam/ministral-3b-latest",
-    response_format: responseSchema,
+    response_format: config.responseSchema,
 
   });
   console.log(response)
