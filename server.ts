@@ -35,31 +35,10 @@ function getMistralClient(): Mistral {
   return mistralClient;
 }
 
-// Lazy initializer for Google Gen AI client
-let aiClient: GoogleGenAI | null = null;
 
-function getAiClient(): GoogleGenAI {
-  if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY || "AI_STUDIO_DEFAULT_KEY";
-    aiClient = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
-      },
-    });
-  }
-  return aiClient;
-}
   const portkey = new Portkey({
   apiKey: process.env.PORTKEY
 });
-
-// Gemini Flash model fallbacks
-const FALLBACK_MODELS = [
-  "gemini-3.5-flash-lite",
-];
 
 async function callGeminiWithFallback(config: {
   contents: any;
@@ -67,16 +46,14 @@ async function callGeminiWithFallback(config: {
   responseSchema?: any;
 }) {
   let lastError: any = null;
-
     try {
-   
-
   const response = await portkey.chat.completions.create({
     messages: contents,
     model: "@novam/ministral-3b-latest",
     response_format: responseSchema,
 
   });
+  console.log(response)
       return response;
     } catch (err: any) {
       lastError = err;
